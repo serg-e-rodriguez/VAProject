@@ -155,11 +155,16 @@ def clean_creative_stats(df: pd.DataFrame) -> pd.DataFrame:
     elif "spend_usd" in cleaned.columns:
         cleaned["spend_usd_est"] = pd.to_numeric(cleaned["spend_usd"], errors="coerce").fillna(0.0)
 
-    # 6. Dates and duration
+    # 6. Dates, temporal filtering (2024 to Current), and duration
     date_cols = ["date_range_start", "date_range_end", "first_served_timestamp", "last_served_timestamp"]
     for col in date_cols:
         if col in cleaned.columns:
             cleaned[col] = pd.to_datetime(cleaned[col], errors="coerce")
+
+    # Strict temporal filter: Retain campaigns active from 2024 to current
+    if "date_range_start" in cleaned.columns:
+        valid_date_mask = cleaned["date_range_start"].isna() | (cleaned["date_range_start"] >= pd.Timestamp("2024-01-01"))
+        cleaned = cleaned[valid_date_mask]
 
     if "date_range_start" in cleaned.columns and "date_range_end" in cleaned.columns:
         cleaned["duration_days"] = (cleaned["date_range_end"] - cleaned["date_range_start"]).dt.days + 1
@@ -197,6 +202,69 @@ def unnest_demographics(df: pd.DataFrame, demographic_col: str = "age_targeting"
     exploded = exploded.explode(demographic_col)
     exploded[demographic_col] = exploded[demographic_col].str.strip()
     return exploded
+
+
+def process_meta_demographics(df_meta: pd.DataFrame) -> pd.DataFrame:
+    """
+    Unnests Meta Ad Library API `demographic_distribution` objects into structured rows:
+    - age_group (e.g. 18-24, 25-34, 35-44, 45-54, 55-64, ≥65)
+    - gender (Female, Male)
+    - percentage (audience reach share)
+    - demographic_spend_usd = spend_usd_est * percentage
+    - demographic_impressions = impressions_est * percentage
+    - creative format (VIDEO, IMAGE, TEXT)
+    - ad titles, snapshot URLs, and messaging copy
+    Allows examining what types of ads (specifically video vs. static creatives)
+    are delivered to each age and gender demographic in North Carolina.
+    """
+    if df_meta.empty or "demographic_distribution" not in df_meta.columns:
+        return pd.DataFrame()
+
+    rows = []
+    for _, ad in df_meta.iterrows():
+        dist = ad.get("demographic_distribution")
+        if not isinstance(dist, list) or not dist:
+            continue
+        spend = float(ad.get("spend_usd_est", 0.0))
+        impressions = float(ad.get("impressions_est", 0.0))
+        ad_id = ad.get("ad_id")
+        adv_name = ad.get("advertiser_name")
+        ad_type = str(ad.get("ad_type", "IMAGE")).upper()
+        snap_url = ad.get("ad_snapshot_url", ad.get("ad_url", ""))
+        ad_body = ad.get("ad_creative_bodies", "")
+        ad_title = ad.get("ad_creative_link_titles", "")
+        dma = ad.get("nc_dma", "Charlotte DMA")
+        start_date = ad.get("date_range_start")
+
+        for item in dist:
+            if not isinstance(item, dict):
+                continue
+            pct = float(item.get("percentage", 0.0))
+            age = str(item.get("age", "")).strip()
+            if age == "65+":
+                age = "≥65"
+            gender = str(item.get("gender", "")).capitalize().strip()
+            if not age or not gender:
+                continue
+
+            rows.append({
+                "ad_id": ad_id,
+                "advertiser_name": adv_name,
+                "ad_type": ad_type,
+                "age_group": age,
+                "gender": gender,
+                "share_pct": pct,
+                "demographic_spend_usd": spend * pct,
+                "demographic_impressions": impressions * pct,
+                "ad_snapshot_url": snap_url,
+                "ad_creative_body": ad_body,
+                "ad_creative_title": ad_title,
+                "nc_dma": dma,
+                "date_range_start": start_date,
+                "platform": "Meta"
+            })
+
+    return pd.DataFrame(rows)
 
 
 def clean_geo_spend(df: pd.DataFrame) -> pd.DataFrame:
@@ -265,40 +333,40 @@ def clean_advertiser_weekly_spend(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
-# North Carolina Key Counties with FIPS codes and assigned DMAs
+# North Carolina Key Counties with FIPS codes, DMAs, and spatial centroid coordinates
 NC_COUNTIES = [
-    {"county_name": "Mecklenburg", "fips": 37119, "nc_dma": "Charlotte DMA", "share_weight": 0.22},
-    {"county_name": "Wake", "fips": 37183, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.20},
-    {"county_name": "Guilford", "fips": 37081, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.10},
-    {"county_name": "Forsyth", "fips": 37067, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.08},
-    {"county_name": "Cumberland", "fips": 37051, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06},
-    {"county_name": "Durham", "fips": 37063, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06},
-    {"county_name": "Buncombe", "fips": 37021, "nc_dma": "Asheville DMA", "share_weight": 0.05},
-    {"county_name": "Union", "fips": 37179, "nc_dma": "Charlotte DMA", "share_weight": 0.04},
-    {"county_name": "New Hanover", "fips": 37129, "nc_dma": "Wilmington DMA", "share_weight": 0.04},
-    {"county_name": "Gaston", "fips": 37071, "nc_dma": "Charlotte DMA", "share_weight": 0.03},
-    {"county_name": "Cabarrus", "fips": 37025, "nc_dma": "Charlotte DMA", "share_weight": 0.03},
-    {"county_name": "Johnston", "fips": 37101, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.03},
-    {"county_name": "Pitt", "fips": 37147, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.02},
-    {"county_name": "Alamance", "fips": 37001, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02},
-    {"county_name": "Davidson", "fips": 37057, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02},
-    {"county_name": "Iredell", "fips": 37097, "nc_dma": "Charlotte DMA", "share_weight": 0.02},
-    {"county_name": "Orange", "fips": 37135, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.02},
-    {"county_name": "Rowan", "fips": 37159, "nc_dma": "Charlotte DMA", "share_weight": 0.015},
-    {"county_name": "Catawba", "fips": 37035, "nc_dma": "Charlotte DMA", "share_weight": 0.015},
-    {"county_name": "Brunswick", "fips": 37019, "nc_dma": "Wilmington DMA", "share_weight": 0.015},
-    {"county_name": "Onslow", "fips": 37133, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.015},
-    {"county_name": "Wayne", "fips": 37191, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01},
-    {"county_name": "Henderson", "fips": 37089, "nc_dma": "Asheville DMA", "share_weight": 0.01},
-    {"county_name": "Craven", "fips": 37049, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01},
-    {"county_name": "Harnett", "fips": 37085, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.01},
+    {"county_name": "Mecklenburg", "fips": 37119, "nc_dma": "Charlotte DMA", "share_weight": 0.22, "x": 38, "y": 68},
+    {"county_name": "Wake", "fips": 37183, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.20, "x": 62, "y": 38},
+    {"county_name": "Guilford", "fips": 37081, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.10, "x": 48, "y": 30},
+    {"county_name": "Forsyth", "fips": 37067, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.08, "x": 42, "y": 28},
+    {"county_name": "Cumberland", "fips": 37051, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 58, "y": 62},
+    {"county_name": "Durham", "fips": 37063, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 58, "y": 33},
+    {"county_name": "Buncombe", "fips": 37021, "nc_dma": "Asheville DMA", "share_weight": 0.05, "x": 19, "y": 55},
+    {"county_name": "Union", "fips": 37179, "nc_dma": "Charlotte DMA", "share_weight": 0.04, "x": 42, "y": 76},
+    {"county_name": "New Hanover", "fips": 37129, "nc_dma": "Wilmington DMA", "share_weight": 0.04, "x": 75, "y": 82},
+    {"county_name": "Gaston", "fips": 37071, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 34, "y": 66},
+    {"county_name": "Cabarrus", "fips": 37025, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 42, "y": 58},
+    {"county_name": "Johnston", "fips": 37101, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.03, "x": 64, "y": 46},
+    {"county_name": "Pitt", "fips": 37147, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.02, "x": 75, "y": 40},
+    {"county_name": "Alamance", "fips": 37001, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 52, "y": 32},
+    {"county_name": "Davidson", "fips": 37057, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 44, "y": 45},
+    {"county_name": "Iredell", "fips": 37097, "nc_dma": "Charlotte DMA", "share_weight": 0.02, "x": 36, "y": 46},
+    {"county_name": "Orange", "fips": 37135, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.02, "x": 55, "y": 34},
+    {"county_name": "Rowan", "fips": 37159, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 40, "y": 52},
+    {"county_name": "Catawba", "fips": 37035, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 30, "y": 52},
+    {"county_name": "Brunswick", "fips": 37019, "nc_dma": "Wilmington DMA", "share_weight": 0.015, "x": 72, "y": 90},
+    {"county_name": "Onslow", "fips": 37133, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.015, "x": 75, "y": 68},
+    {"county_name": "Wayne", "fips": 37191, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01, "x": 68, "y": 52},
+    {"county_name": "Henderson", "fips": 37089, "nc_dma": "Asheville DMA", "share_weight": 0.01, "x": 21, "y": 64},
+    {"county_name": "Craven", "fips": 37049, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01, "x": 78, "y": 56},
+    {"county_name": "Harnett", "fips": 37085, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.01, "x": 58, "y": 52},
 ]
 
 
 def generate_nc_county_spend(df_geo: pd.DataFrame) -> pd.DataFrame:
     """
     Computes county-level ad spend across North Carolina based on DMA distributions and county weights.
-    Returns DataFrame with county_name, fips, nc_dma, spend_usd, and estimated impressions.
+    Returns DataFrame with county_name, fips, nc_dma, spend_usd, estimated impressions, and coordinates.
     """
     total_dma_spend = df_geo.groupby("nc_dma")["spend_usd"].sum().to_dict() if not df_geo.empty else {}
     overall_total = df_geo["spend_usd"].sum() if not df_geo.empty else 9200000.0
@@ -306,8 +374,6 @@ def generate_nc_county_spend(df_geo: pd.DataFrame) -> pd.DataFrame:
     records = []
     for c in NC_COUNTIES:
         dma = c["nc_dma"]
-        dma_total = total_dma_spend.get(dma, overall_total * 0.2)
-        # Allocate county spend proportional to its weight in the DMA
         county_spend = round(overall_total * c["share_weight"], 2)
         est_impressions = int(county_spend * 45)  # approximate impression ratio
         records.append({
@@ -316,6 +382,8 @@ def generate_nc_county_spend(df_geo: pd.DataFrame) -> pd.DataFrame:
             "nc_dma": dma,
             "spend_usd": county_spend,
             "impressions_est": est_impressions,
+            "x": c.get("x", 50),
+            "y": c.get("y", 50),
             "spend_tier": "🔥 Very High" if county_spend >= 1_000_000 else (
                 "🟡 High" if county_spend >= 400_000 else (
                     "🟢 Moderate" if county_spend >= 150_000 else "⚪ Low"

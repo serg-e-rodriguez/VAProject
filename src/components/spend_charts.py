@@ -164,3 +164,55 @@ def create_nc_platform_comparison_chart(df_combined: pd.DataFrame) -> alt.Chart:
         )
     )
     return chart
+
+
+def create_top_spenders_overview_chart(df: pd.DataFrame, top_n: int = 8) -> alt.Chart:
+    """Ranks the top political spenders in North Carolina across platforms."""
+    if df.empty or "advertiser_name" not in df.columns:
+        return alt.Chart(pd.DataFrame()).mark_text()
+
+    agg = (
+        df.groupby(["advertiser_name", "platform"], as_index=False)["spend_usd_est"]
+        .sum()
+    )
+
+    top_names = (
+        agg.groupby("advertiser_name")["spend_usd_est"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(top_n)
+        .index.tolist()
+    )
+
+    agg = agg[agg["advertiser_name"].isin(top_names)].copy()
+
+    chart = (
+        alt.Chart(agg)
+        .mark_bar(cornerRadiusEnd=4, size=18)
+        .encode(
+            y=alt.Y("advertiser_name:N", sort="-x", title="PAC / Campaign Organization"),
+            x=alt.X("spend_usd_est:Q", title="Total Estimated Spend ($ USD)", axis=alt.Axis(format="$,~s")),
+            color=alt.Color(
+                "platform:N",
+                scale=alt.Scale(domain=["Google", "Meta"], range=["#4285F4", "#0668E1"]),
+                legend=alt.Legend(title="Platform", orient="bottom")
+            ),
+            tooltip=[
+                alt.Tooltip("advertiser_name:N", title="Spender"),
+                alt.Tooltip("platform:N", title="Platform"),
+                alt.Tooltip("spend_usd_est:Q", title="Spend", format="$,.2f")
+            ]
+        )
+        .properties(
+            title=alt.TitleParams(
+                text=f"Top {top_n} Political Advertisers in North Carolina (2024–Current)",
+                subtitle="Identifies the highest-spending campaigns and PACs across Google and Meta",
+                fontSize=14,
+                subtitleFontSize=11,
+                subtitleColor="#94a3b8"
+            ),
+            height=300
+        )
+    )
+    return chart
+

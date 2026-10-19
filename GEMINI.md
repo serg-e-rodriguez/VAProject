@@ -6,10 +6,23 @@ You are an expert Python Data Engineer and Visualization Specialist assisting in
 - **Geographic Scope (Strictly North Carolina):** The scope of this project is strictly limited to **North Carolina (NC)**. All demographic gap evaluations, competitor spend tracking, and market analyses focus exclusively on North Carolina voters and media markets (DMAs).
 - **Temporal Scope (2024 to Current):** All analysis is strictly scoped to political advertising data from **2024 to current** (January 1, 2024 onward), tracking the latest election cycles, active candidate campaigns, and PAC spending in North Carolina.
 - **Interactive Drop-Down Menu Controls:** The dashboard must empower users to use **drop-down menus (`st.selectbox`)** directly within/above visualization blocks to dynamically control what each graph is showing (e.g. toggling metrics like Spend vs. Impressions vs. Ad Count, or switching between demographic cuts and regional media markets).
+- **Dashboard Information Architecture (Overview First, Then Specific Deep Dives):**
+  - **Tab 1: Comprehensive Data Overview (Executive Summary):** The first page of the dashboard must provide a high-level macro overview of the data across North Carolina (total expenditure, estimated impressions, total ad creatives tracked, Google vs. Meta platform market share split, top saturated media markets, leading PAC/campaign spenders, and an executive tactical takeaways briefing).
+  - **Subsequent Tabs: Targeted Deep-Dive Analytical Modules:** Every tab following the overview presents a deep dive into specific campaign dimensions:
+    - *Tab 2: Demographic Opportunity & Gap Analysis (NC Voters)*
+    - *Tab 3: Targeted Ad Formats & Creative Intelligence (Strictly Separated Google BigQuery & Meta Subsections)*
+    - *Tab 4: Regional Competitor Spend & NC County Heatmap*
+    - *Tab 5: Platform Performance & Pacing (2024–Current)*
+    - *Tab 6: Key Dataset Facts & Methodology*
 - **Core Analytical Objectives:**
-  1. **Demographic Opportunity & Gap Analysis (NC Voters):** Identify which demographic groups (e.g., age cohorts, gender segments) of North Carolina voters are viewing political ads the least, pinpointing under-served voter groups our campaign needs to focus on and prioritize for outreach.
-  2. **Regional Competitor Spend Intelligence (NC County Heatmap & Media Markets):** Map and analyze where competitor campaigns, PACs, and rival advertisers are spending the most money across North Carolina's media markets (DMAs) and counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe). Use an **image of North Carolina and its counties and apply a heatmap over that image** to showcase what regions and counties are getting the most attention via spending, pinpointing regional spending epicenters, battleground saturation, and geographic spending disparities.
-  3. **Targeted Video & Creative Ad Content Intelligence via Meta API (Demographic-Specific):** A dedicated section of the dashboard analyzing what types of ads (Video, Image, Text) are being shown across North Carolina. For the video data section, use the **Facebook / Meta Ad Library API** (`demographic_distribution` and creative format metadata) to see what types of ads (specifically video vs. image/text) are being shown to each age and gender demographic, allowing the campaign to determine what content applies best to each demographic.
+  1. **Demographic Opportunity & Gap Analysis (NC Voters - Platform Separation & Strategic Insights):**
+     - **Keep Google and Meta API Data Strictly Separate:** The demographic analysis must keep Google BigQuery data and Meta Ad Library API data separate (via dedicated views/sub-tabs) to preserve data integrity between Google's advertiser targeting settings and Meta's empirical audience delivery metrics (`demographic_distribution`).
+     - **Data-Driven Campaign Insights:** Each demographic view must present automated, actionable strategic insights derived from the data (identifying under-served cohorts, competitor blind spots, and cross-platform reallocation recommendations).
+  2. **Regional Competitor Spend Intelligence (NC County Heatmap & Media Markets):** Map and analyze where competitor campaigns, PACs, and rival advertisers are spending the most money across North Carolina's media markets (DMAs) and counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe). Use an **image of North Carolina and its counties and apply a heatmap over that image** to showcase what regions and counties are getting the most attention via spending, pinpointing regional spending epicenters, battleground saturation, and geographic spending disparities. Render this visualization using native component rendering (`st.components.v1.html`) or visual graphic rendering to ensure the map displays cleanly without exposing raw HTML code.
+  3. **Targeted Ad Formats & Creative Ad Content Intelligence (Strictly Separated Subsections for Google & Meta):**
+     - A dedicated section of the dashboard analyzing what types of ads (Video, Image, Text) are being displayed across North Carolina, strictly separated into two distinct subsections:
+       - *Subsection A: Google Political Ads (BigQuery):* Analyzes ad format distribution (Video, Image, Text) deployed across Google's network (YouTube, Google Display Network, Search) from BigQuery `creative_stats`. Features spend allocation, impression scale, CPM delivery efficiency by format, and inspectable Google Transparency Report disclosure links.
+       - *Subsection B: Meta Ad Library (Meta API):* Analyzes ad formats (Video, Image, Text) delivered to specific age and gender demographics using Meta Graph API `demographic_distribution` and creative format classifications. Allows campaign strategists to filter by specific age cohorts and gender segments to inspect video adoption rates, format delivery shares, CPM costs, and inspectable Meta Ad Library creative snapshots (`ad_snapshot_url`).
 - Prioritize **modern, modular code** with clean separation between data extraction, data processing, and UI layout.
 - Explain setup steps and dependency management clearly using the `uv` workflow.
 - Prioritize code readability, performance caching, defensive API handling, and educational value.
@@ -210,19 +223,46 @@ To prepare the BigQuery Political Ads and Meta Ad Library data for campaign inte
   - **Pacing Granularity Dropdown:** Allows users to toggle between *Weekly Expenditure Pace* and *Cumulative Spend Trajectory*.
   - **Target Demographic Selectors (Video & Ad Content View):** Allows the client to select specific **Age Groups** and **Gender Segments** to inspect what creative ad types (Video, Image, Text) and messaging are shown to them using Meta API data.
 
+- **Dashboard Tab Structure (Overview Page First, Followed by Specific Deep Dives):**
+  - **Tab 1: 📊 Executive Campaign Overview (2024–Current):** A comprehensive macro overview of the data across North Carolina. Summarizes total expenditure, estimated impressions, total active creatives, Google vs. Meta platform market share split, regional media market allocation, top competitor PACs/campaigns, and an automated executive tactical briefing.
+  - **Tab 2: 🎯 Demographic Opportunity & Gap Analysis (NC Voters):** Detailed demographic intelligence with Google BigQuery and Meta Ad Library data kept strictly separate, supplemented with automated data-driven campaign insights.
+  - **Tab 3: 🎬 Targeted Ad Formats & Creative Intelligence (Separated Google BigQuery & Meta Subsections):** Dedicated creative format analysis (Video, Image, Text) strictly separated into two distinct subsections:
+    1. *Google Political Ads (BigQuery):* Analyzes ad format distributions, spend volume, impression scale, CPM delivery efficiency, and Google Transparency Report links.
+    2. *Meta Ad Library (Meta API):* Analyzes empirical format delivery to voter cohorts via `demographic_distribution`, Video vs. Image adoption curves across age groups, gender delivery splits, and Meta Ad Library snapshot URLs.
+  - **Tab 4: 🗺️ Regional Competitor Spend & NC County Heatmap:** Media market breakdowns, competitor share, and the interactive SVG county heatmap applied over the NC map image.
+  - **Tab 5: 📈 Platform Performance & Pacing (2024–Current):** Weekly expenditure pacing and cumulative trajectories.
+  - **Tab 6: ℹ️ Key Dataset Facts & Methodology:** Reference notes on methodology, currency, and API boundaries.
+
 - **Campaign-Focused Analytical Views (North Carolina Focus):**
+  - **Executive Campaign Overview (`app.py` & `spend_charts.py`):**
+    - High-visibility KPI cards (Total Spend, Impressions, Creatives, Leading Spender, Primary Demographic Alert).
+    - Cross-platform market share breakdown (Google vs. Meta expenditure and impressions).
+    - Top North Carolina Designated Market Areas (DMAs) spend ranking.
+    - Automated Executive Briefing detailing macro takeaways and battleground dynamics.
   - **Demographic Gap & Opportunity View (`audience_charts.py`):**
-    - Rank and highlight NC demographic groups (age brackets, gender) by lowest impression share and reach from 2024 to current.
-    - Use visual alerts/conditional coloring (e.g., warning highlights on bottom cohorts) to clearly show under-served demographics requiring immediate campaign targeting.
+    - **Separate Google BigQuery and Meta API Data:** The demographic view must feature dedicated, separated sub-tabs/sections:
+      1. *Google Ads Demographic Footprint (BigQuery):* Analyzes Google advertiser targeting parameters, ranking NC voter age cohorts and gender targeting to uncover under-served demographics.
+      2. *Meta Ads Audience Delivery (Meta API):* Analyzes empirical delivered impression reach from `demographic_distribution` across age brackets and genders, highlighting video vs. static creative adoption.
+      3. *Cross-Platform Strategic Comparison:* Directly benchmarks Google targeting volume against Meta delivery.
+    - **Automated Strategic Campaign Insights:** Each demographic view must present a dedicated, high-visibility strategic insights briefing detailing under-served voter cohorts, competitor spending vacuums, and concrete digital budget recommendations for North Carolina operatives.
+  - **Targeted Ad Formats & Creative Intelligence View (`creative_charts.py`):**
+    - **Two Strictly Separated Subsections for Google and Meta Data:**
+      1. *Subsection 1: Google Political Ads (BigQuery):*
+         - Features interactive drop-downs to filter by target age and gender targeting parameters, or analyze broad format distribution across Google's ad inventory (YouTube, Display, Search).
+         - Visualizes format breakdown (Video vs. Image vs. Text) across Spend, Impressions, and Ad Count.
+         - Displays CPM delivery efficiency by format ($ / 1,000 impressions) to uncover cost-effective formats.
+         - Provides an inspectable Google Ad Creatives Ledger with direct links to the Google Political Ads Transparency Report (`ad_url`).
+      2. *Subsection 2: Meta Ad Library (Meta API):*
+         - Features interactive drop-downs allowing operatives to choose target Age Groups (18-24, 25-34, 35-44, 45-54, 55-64, ≥65) and Genders (Female, Male, All).
+         - Visualizes format distribution (Video vs. Image vs. Text) delivered specifically to the selected voter segment based on Meta's `demographic_distribution`.
+         - Features a Demographic Video Adoption Curve across all voter age cohorts in North Carolina, contrasting video usage among Gen Z / Millennial voters vs. older demographics.
+         - Features a Gender Ad Format Breakdown comparing Video vs. Static delivery between Female and Male voters.
+         - Provides an inspectable Meta Ad Creative Gallery displaying headlines, message bodies, format badges, and live preview links (`ad_snapshot_url`).
   - **Regional Competitor Spend View & NC County Heatmap (`geo_charts.py`):**
-    - Render an interactive **North Carolina County Spend Heatmap applied over an image of North Carolina and its counties** (e.g. choropleth overlay with county boundaries or heatmap overlay on NC county basemap) displaying ad expenditure across all NC counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe, Union, New Hanover, Gaston, Cabarrus) using a vivid heatmap color gradient (e.g., yellow-to-red or viridis) to showcase what regions are getting the most attention via spending.
+    - Render an interactive **North Carolina County Spend Heatmap applied over an image of North Carolina and its counties** (e.g. SVG county boundaries with continuous radiant heatmap blooms) displaying ad expenditure across all NC counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe, Union, New Hanover, Gaston, Cabarrus) using a vivid heatmap color gradient (yellow-to-orange-to-red) to showcase what regions are getting the most attention via spending.
+    - Render this visualization using native Streamlit component rendering (`st.components.v1.html(..., height=460)`) or visual graphic rendering to guarantee that the SVG map and CSS styling render cleanly and never display raw HTML code.
     - Map and rank North Carolina DMAs/media markets (Charlotte, Raleigh-Durham, Greensboro-Winston-Salem, Greenville, Wilmington, Asheville) and counties by total competitor expenditure.
     - Provide stacked bar charts and market share breakdowns by rival candidates, PACs, and advertiser organizations to expose battleground saturation across North Carolina.
-  - **Targeted Video & Creative Ad Content View via Meta API (`creative_charts.py`):**
-    - A dedicated dashboard section for video data using the **Facebook / Meta Ad Library API** to see what types of ads (Video, Image, Text) are being shown to each age and gender demographic across North Carolina.
-    - Empower the campaign client to select their target **Age Groups** (e.g. 18-24, 25-34, 35-44, 45-54, 55-64, ≥65) and **Gender** (Female, Male, All) via interactive drop-down menus.
-    - Dynamically display the format distribution (Video vs. Image vs. Text), comparing spend, impressions, and demographic delivery percentages from Meta's `demographic_distribution` for the chosen demographic to determine what types of ads (specifically video vs. static creatives) apply best to each group.
-    - Provide an inspectable creative sample gallery/table showing ad titles, ad preview/snapshot URLs (`ad_snapshot_url`), format badges (Video, Image, Text), active flight duration, and sponsoring PACs so clients can inspect what content and video messaging are actively deployed to their demographic of interest.
 
 - **Strict Typing:** Always specify explicit Altair data types on encodings:
   - `:Q` Quantitative (spend, impressions)

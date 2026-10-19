@@ -44,8 +44,11 @@ NC_MARKET_LOCATIONS = [
 NC_MARKET_PROBS = [0.32, 0.28, 0.18, 0.10, 0.07, 0.05]
 
 
-def generate_mock_creative_stats(n: int = 1200) -> pd.DataFrame:
-    """Generates realistic synthetic Google Political Ads creative_stats data for North Carolina."""
+def generate_mock_creative_stats(n: int = 1500) -> pd.DataFrame:
+    """
+    Generates realistic synthetic Google Political Ads creative_stats data for North Carolina.
+    Strictly scoped to 2024 to current.
+    """
     np.random.seed(42)
     
     ad_types = ["VIDEO", "IMAGE", "TEXT"]
@@ -73,14 +76,15 @@ def generate_mock_creative_stats(n: int = 1200) -> pd.DataFrame:
     for i in range(n):
         adv_id, adv_name = NC_ADVERTISERS[np.random.choice(len(NC_ADVERTISERS))]
         ad_type = np.random.choice(ad_types, p=ad_type_probs)
-        start_offset = int(np.random.exponential(scale=90)) % 300
+        # Offset strictly within 2024 to current
+        start_offset = int(np.random.exponential(scale=80)) % 290
         start_date = base_date + pd.Timedelta(days=start_offset)
         duration = int(np.random.gamma(shape=2, scale=7)) + 1
         end_date = start_date + pd.Timedelta(days=duration)
         
         bucket = np.random.choice(impression_buckets, p=bucket_probs)
         
-        min_spend = float(np.random.choice([150, 350, 750, 1500, 3000, 7500, 15000, 30000]))
+        min_spend = float(np.random.choice([250, 500, 1000, 2500, 5000, 12000, 25000, 45000]))
         max_spend = min_spend * float(np.random.choice([1.5, 2.0, 3.0])) if np.random.rand() > 0.12 else None
 
         market_idx = np.random.choice(len(NC_MARKET_LOCATIONS), p=NC_MARKET_PROBS)
@@ -160,9 +164,30 @@ def generate_mock_weekly_spend() -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+import os
+from pathlib import Path
+
+
+def has_gcp_credentials() -> bool:
+    """Checks whether GCP authentication credentials or ADC file are present."""
+    cred_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if cred_file and Path(cred_file).is_file():
+        return True
+    adc_file = Path("~/.config/gcloud/application_default_credentials.json").expanduser()
+    if adc_file.is_file():
+        return True
+    return False
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bigquery_creative_stats(limit: int = 5000) -> tuple[pd.DataFrame, bool]:
-    """Loads creative_stats for North Carolina from BigQuery or mock dataset."""
+    """
+    Loads creative_stats for North Carolina from BigQuery or mock dataset.
+    Strictly filters for campaigns active from 2024 to current.
+    """
+    if not has_gcp_credentials():
+        return generate_mock_creative_stats(n=limit), False
+
     try:
         from google.cloud import bigquery
         client = bigquery.Client(project=GCP_PROJECT_ID)
@@ -173,7 +198,10 @@ def load_bigquery_creative_stats(limit: int = 5000) -> tuple[pd.DataFrame, bool]
             spend_range_min_usd, spend_range_max_usd, age_targeting,
             gender_targeting, geo_targeting_included
         FROM `{BIGQUERY_POLITICAL_ADS_DATASET}.creative_stats`
-        WHERE regions = 'US' AND REGEXP_CONTAINS(geo_targeting_included, r'North Carolina|NC')
+        WHERE regions = 'US' 
+          AND REGEXP_CONTAINS(geo_targeting_included, r'North Carolina|NC')
+          AND date_range_start >= '2024-01-01'
+        ORDER BY date_range_start DESC
         LIMIT {limit}
         """
         df = client.query(query).to_dataframe()
@@ -187,6 +215,9 @@ def load_bigquery_creative_stats(limit: int = 5000) -> tuple[pd.DataFrame, bool]
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bigquery_geo_spend() -> tuple[pd.DataFrame, bool]:
     """Loads North Carolina regional spend from BigQuery or mock dataset."""
+    if not has_gcp_credentials():
+        return generate_mock_geo_spend(), False
+
     try:
         from google.cloud import bigquery
         client = bigquery.Client(project=GCP_PROJECT_ID)
@@ -195,6 +226,7 @@ def load_bigquery_geo_spend() -> tuple[pd.DataFrame, bool]:
             advertiser_id, advertiser_name, country, country_subdivision_primary, spend_usd
         FROM `{BIGQUERY_POLITICAL_ADS_DATASET}.geo_spend`
         WHERE country_subdivision_primary = 'North Carolina'
+          AND spend_usd IS NOT NULL
         """
         df = client.query(query).to_dataframe()
         return df, True
@@ -204,7 +236,13 @@ def load_bigquery_geo_spend() -> tuple[pd.DataFrame, bool]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_bigquery_weekly_spend() -> tuple[pd.DataFrame, bool]:
-    """Loads NC weekly spend pacing from BigQuery or mock dataset."""
+    """
+    Loads NC weekly spend pacing from BigQuery or mock dataset.
+    Filtered strictly for 2024 to current.
+    """
+    if not has_gcp_credentials():
+        return generate_mock_weekly_spend(), False
+
     try:
         from google.cloud import bigquery
         client = bigquery.Client(project=GCP_PROJECT_ID)
@@ -213,6 +251,8 @@ def load_bigquery_weekly_spend() -> tuple[pd.DataFrame, bool]:
             advertiser_id, advertiser_name, election_cycle, week_start_date, spend_usd
         FROM `{BIGQUERY_POLITICAL_ADS_DATASET}.advertiser_weekly_spend`
         WHERE spend_usd IS NOT NULL
+          AND week_start_date >= '2024-01-01'
+        ORDER BY week_start_date ASC
         """
         df = client.query(query).to_dataframe()
         return df, True

@@ -1,7 +1,11 @@
 """
 Streamlit Entry Point: North Carolina Political Ads Strategic Intelligence Dashboard
-Analyzes demographic reach gaps among NC voters and regional competitor spend across NC DMAs.
+Analyzes demographic reach gaps among NC voters, regional competitor spend across NC DMAs,
+and demographic-specific video/creative ad formats via Meta API.
 Features dynamic drop-down menus for complete interactive control over visualizations.
+Strictly scoped to North Carolina from 2024 to current.
+Information Architecture: Overview first, then specific deep-dive tabs.
+Targeted Ad Formats section strictly separates Google BigQuery and Meta Ad Library subsections.
 """
 
 import sys
@@ -13,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import altair as alt
 
@@ -28,30 +33,46 @@ try:
         clean_geo_spend,
         clean_advertiser_weekly_spend,
         unnest_demographics,
+        process_meta_demographics,
         generate_nc_county_spend,
         NC_DMAS
     )
     from src.components.audience_charts import (
         create_nc_demographic_gap_chart,
         create_nc_gender_breakdown_chart,
-        create_nc_cross_platform_demographic_chart
+        create_nc_cross_platform_demographic_chart,
+        create_meta_demographic_delivery_chart,
+        create_meta_gender_reach_chart,
+        generate_google_demographic_insights,
+        generate_meta_demographic_insights,
+        generate_cross_platform_strategic_insights
     )
     from src.components.geo_charts import (
         create_nc_dma_ranking_chart,
         create_nc_advertiser_breakdown_chart,
         create_nc_market_share_chart,
         create_nc_county_heatmap_chart,
-        create_nc_county_choropleth_chart
+        create_nc_county_choropleth_chart,
+        create_nc_county_spatial_heatmap_chart,
+        generate_nc_county_map_heatmap_svg
     )
     from src.components.spend_charts import (
         create_nc_spend_trajectory_chart,
         create_nc_format_efficiency_chart,
-        create_nc_platform_comparison_chart
+        create_nc_platform_comparison_chart,
+        create_top_spenders_overview_chart
     )
     from src.components.creative_charts import (
-        filter_creatives_by_demographic,
-        create_demographic_format_distribution_chart,
-        create_format_cpm_efficiency_chart
+        filter_google_creatives,
+        create_google_format_distribution_chart,
+        create_google_format_cpm_chart,
+        generate_google_creative_insights,
+        filter_meta_demographics,
+        create_meta_demographic_format_chart,
+        create_meta_format_cpm_chart,
+        create_video_adoption_by_demographic_chart,
+        create_gender_video_breakdown_chart,
+        generate_meta_creative_insights
     )
 except ModuleNotFoundError:
     from data.bigquery_loader import (
@@ -65,41 +86,57 @@ except ModuleNotFoundError:
         clean_geo_spend,
         clean_advertiser_weekly_spend,
         unnest_demographics,
+        process_meta_demographics,
         generate_nc_county_spend,
         NC_DMAS
     )
     from components.audience_charts import (
         create_nc_demographic_gap_chart,
         create_nc_gender_breakdown_chart,
-        create_nc_cross_platform_demographic_chart
+        create_nc_cross_platform_demographic_chart,
+        create_meta_demographic_delivery_chart,
+        create_meta_gender_reach_chart,
+        generate_google_demographic_insights,
+        generate_meta_demographic_insights,
+        generate_cross_platform_strategic_insights
     )
     from components.geo_charts import (
         create_nc_dma_ranking_chart,
         create_nc_advertiser_breakdown_chart,
         create_nc_market_share_chart,
         create_nc_county_heatmap_chart,
-        create_nc_county_choropleth_chart
+        create_nc_county_choropleth_chart,
+        create_nc_county_spatial_heatmap_chart,
+        generate_nc_county_map_heatmap_svg
     )
     from components.spend_charts import (
         create_nc_spend_trajectory_chart,
         create_nc_format_efficiency_chart,
-        create_nc_platform_comparison_chart
+        create_nc_platform_comparison_chart,
+        create_top_spenders_overview_chart
     )
     from components.creative_charts import (
-        filter_creatives_by_demographic,
-        create_demographic_format_distribution_chart,
-        create_format_cpm_efficiency_chart
+        filter_google_creatives,
+        create_google_format_distribution_chart,
+        create_google_format_cpm_chart,
+        generate_google_creative_insights,
+        filter_meta_demographics,
+        create_meta_demographic_format_chart,
+        create_meta_format_cpm_chart,
+        create_video_adoption_by_demographic_chart,
+        create_gender_video_breakdown_chart,
+        generate_meta_creative_insights
     )
 
 # Page configuration
 st.set_page_config(
-    page_title="North Carolina Political Ads Intelligence Dashboard",
+    page_title="North Carolina Political Ads Strategic Intelligence Dashboard",
     page_icon="🌲",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling
+# Custom Styling (Preserving Sleek Dark Aesthetics & Cards)
 st.markdown("""
 <style>
     .metric-card {
@@ -123,23 +160,47 @@ st.markdown("""
     .alert-box {
         background-color: rgba(239, 68, 68, 0.12);
         border-left: 4px solid #ef4444;
-        padding: 12px 16px;
+        padding: 14px 18px;
         border-radius: 6px;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
+        color: #fca5a5;
     }
     .info-box {
-        background-color: rgba(59, 130, 246, 0.12);
-        border-left: 4px solid #3b82f6;
-        padding: 12px 16px;
+        background-color: rgba(56, 189, 248, 0.12);
+        border-left: 4px solid #38bdf8;
+        padding: 14px 18px;
         border-radius: 6px;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
+        color: #bae6fd;
     }
-    .dropdown-container {
-        background: #1e293b;
+    .success-box {
+        background-color: rgba(16, 185, 129, 0.12);
+        border-left: 4px solid #10b981;
+        padding: 14px 18px;
+        border-radius: 6px;
+        margin-bottom: 20px;
+        color: #a7f3d0;
+    }
+    .insight-card {
+        background-color: #1e293b;
         border: 1px solid #334155;
         border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 14px;
+        padding: 18px 22px;
+        margin-top: 15px;
+        margin-bottom: 20px;
+    }
+    .insight-card h4 {
+        margin: 0 0 10px 0;
+        color: #f1f5f9;
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .insight-card ul {
+        margin: 0;
+        padding-left: 18px;
+        color: #e2e8f0;
+        font-size: 13px;
+        line-height: 1.6;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -149,13 +210,14 @@ def main():
     # Header
     st.title("🌲 North Carolina Political Ads Strategic Intelligence Dashboard")
     st.markdown(
-        "**Battleground North Carolina Analytics:** Comparing political advertising data from "
-        "**Google Cloud BigQuery** and the **Meta Ad Library** to identify under-served voter demographics "
-        "and track competitor spend across North Carolina media markets (DMAs)."
+        "**Battleground North Carolina Analytics (2024 – Current):** Analyzing political advertising data from "
+        "**Google Cloud BigQuery** and the **Meta Ad Library API** to identify under-served voter demographics, "
+        "map competitor spend across North Carolina media markets (DMAs) and counties, and evaluate "
+        "demographic-specific video vs. static ad formats."
     )
 
     # Ingest Data
-    with st.spinner("Ingesting and harmonizing North Carolina political ad data..."):
+    with st.spinner("Ingesting and harmonizing North Carolina political ad data (2024 to Current)..."):
         raw_bq_creatives, bq_live = load_bigquery_creative_stats(limit=3000)
         raw_meta_ads, meta_live = load_meta_ads(max_records=1500)
         raw_geo, geo_live = load_bigquery_geo_spend()
@@ -165,22 +227,26 @@ def main():
         clean_meta = clean_creative_stats(raw_meta_ads)
         combined_creatives = pd.concat([clean_bq, clean_meta], ignore_index=True)
         
+        df_meta_demo = process_meta_demographics(clean_meta)
         cleaned_geo = clean_geo_spend(raw_geo)
         cleaned_weekly = clean_advertiser_weekly_spend(raw_weekly)
         df_county = generate_nc_county_spend(cleaned_geo)
 
-    # Badges
+    # Status Badges
     st.markdown(
         f"""
-        <div style="display:flex; gap:12px; margin-bottom: 20px; flex-wrap:wrap;">
+        <div style="display:flex; gap:10px; margin-bottom: 20px; flex-wrap:wrap;">
             <span style="background:#059669; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:600;">
                 Scope: North Carolina (NC Only)
+            </span>
+            <span style="background:#6366f1; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:600;">
+                Temporal: 2024 – Current
             </span>
             <span style="background:{'#10b981' if bq_live else '#f59e0b'}; color:black; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:600;">
                 BigQuery: {'Live Connected' if bq_live else 'NC Public Sample Dataset'}
             </span>
             <span style="background:{'#10b981' if meta_live else '#f59e0b'}; color:black; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:600;">
-                Meta Ad Library: {'Live Connected' if meta_live else 'NC Public Sample Dataset'}
+                Meta API: {'Live Connected' if meta_live else 'NC Public Sample Dataset'}
             </span>
             <span style="background:#0ea5e9; color:black; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:600;">
                 Currency: Strict USD
@@ -214,6 +280,8 @@ def main():
         filtered_df = filtered_df[filtered_df["nc_dma"] == selected_dma]
         cleaned_geo = cleaned_geo[cleaned_geo["nc_dma"] == selected_dma]
         df_county = df_county[df_county["nc_dma"] == selected_dma]
+        if not df_meta_demo.empty and "nc_dma" in df_meta_demo.columns:
+            df_meta_demo = df_meta_demo[df_meta_demo["nc_dma"] == selected_dma]
 
     # NC Competitors Multi-select
     all_advertisers = sorted(filtered_df["advertiser_name"].dropna().unique().tolist())
@@ -226,234 +294,637 @@ def main():
         filtered_df = filtered_df[filtered_df["advertiser_name"].isin(selected_advertisers)]
         cleaned_geo = cleaned_geo[cleaned_geo["advertiser_name"].isin(selected_advertisers)]
         cleaned_weekly = cleaned_weekly[cleaned_weekly["advertiser_name"].isin(selected_advertisers)]
+        if not df_meta_demo.empty and "advertiser_name" in df_meta_demo.columns:
+            df_meta_demo = df_meta_demo[df_meta_demo["advertiser_name"].isin(selected_advertisers)]
 
     st.sidebar.divider()
     st.sidebar.markdown(
-        "**Interactive Feature:**\n"
-        "Use the **drop-down menus** located directly above each chart card to change what the visualization displays!"
+        "**Interactive Dashboard Controls:**\n"
+        "- Drop-down menus directly control what each visualization displays.\n"
+        "- First tab provides a comprehensive **Executive Overview** of all data.\n"
+        "- Subsequent tabs display deep-dive targeted sections.\n"
+        "- In the Ad Types section, **Google BigQuery** and **Meta Ads** data are strictly separated."
     )
 
     # -----------------------------
-    # Executive Key Facts & Metrics (NC Scope)
+    # Derived Macro Summary Metrics
     # -----------------------------
     total_spend = filtered_df["spend_usd_est"].sum()
     total_impressions = filtered_df["impressions_est"].sum()
     total_ads = len(filtered_df)
 
-    unnested_demo = unnest_demographics(filtered_df, "age_targeting")
+    unnested_demo = unnest_demographics(clean_bq, "age_targeting")
     demo_reach = unnested_demo.groupby("age_targeting")["impressions_est"].sum()
-    least_viewed_cohort = demo_reach.idxmin() if not demo_reach.empty else "N/A"
+    least_viewed_cohort = demo_reach.idxmin() if not demo_reach.empty else "18-24"
 
     top_dma_spend = cleaned_geo.groupby("nc_dma")["spend_usd"].sum()
     top_spend_dma = top_dma_spend.idxmax() if not top_dma_spend.empty else "N/A"
     top_dma_val = top_dma_spend.max() if not top_dma_spend.empty else 0.0
 
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.markdown(
-            f"""<div class="metric-card">
-                <div class="metric-label">Total NC Spend Analyzed</div>
-                <div class="metric-value">${total_spend:,.0f}</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with kpi2:
-        st.markdown(
-            f"""<div class="metric-card">
-                <div class="metric-label">NC Ad Creatives Tracked</div>
-                <div class="metric-value">{total_ads:,}</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with kpi3:
-        st.markdown(
-            f"""<div class="metric-card">
-                <div class="metric-label">🚨 Top NC Demographic Gap</div>
-                <div class="metric-value" style="color: #ef4444;">{least_viewed_cohort}</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
-    with kpi4:
-        st.markdown(
-            f"""<div class="metric-card">
-                <div class="metric-label">🗺️ Most Saturated NC Market</div>
-                <div class="metric-value" style="color: #f59e0b;">{top_spend_dma.replace(' DMA', '')} (${top_dma_val/1e6:.1f}M)</div>
-            </div>""",
-            unsafe_allow_html=True
-        )
+    top_spenders = filtered_df.groupby("advertiser_name")["spend_usd_est"].sum()
+    leading_spender = top_spenders.idxmax() if not top_spenders.empty else "N/A"
+    leading_spender_val = top_spenders.max() if not top_spenders.empty else 0.0
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # -----------------------------
-    # Main Dashboard Tabs
-    # -----------------------------
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # -----------------------------------------------------------
+    # Main Dashboard Tabs (Overview First, Specific Deep Dives After)
+    # -----------------------------------------------------------
+    tab_overview, tab_demo, tab_creative, tab_geo, tab_pace, tab_info = st.tabs([
+        "📊 Executive Campaign Overview",
         "🎯 Demographic Opportunity & Gap Analysis (NC)",
-        "🎬 Targeted Ad Content & Formats (Age & Gender Filter)",
+        "🎬 Targeted Ad Formats & Creative Intelligence",
         "🗺️ Regional Competitor Spend & NC County Heatmap",
-        "📈 Platform Performance & Pacing (NC)",
+        "📈 Platform Performance & Pacing (2024–Current)",
         "ℹ️ Key Dataset Facts & Methodology"
     ])
 
-    # -----------------------------------------------------------
-    # TAB 1: Demographic Opportunity & Gap Analysis (NC)
-    # -----------------------------------------------------------
-    with tab1:
+    # =========================================================================
+    # TAB 1: EXECUTIVE CAMPAIGN OVERVIEW (Overview of the data)
+    # =========================================================================
+    with tab_overview:
         st.markdown(
-            f"""<div class="alert-box">
-                <strong>Campaign Action Alert:</strong> In North Carolina, the <strong>{least_viewed_cohort}</strong> 
-                demographic cohort is receiving the fewest ad impressions across all active campaigns. 
-                Our field team must prioritize targeted digital buys and grassroots outreach toward this under-served 
-                North Carolina voter group to close voter turnout gaps.
+            """<div class="info-box">
+                <strong>Executive Macro Overview (2024 – Current):</strong> This executive briefing synthesizes 
+                political advertising investments across North Carolina voters. Review high-level platform splits, 
+                designated media market concentration, and top rival spenders before exploring specific deep-dive tabs.
             </div>""",
             unsafe_allow_html=True
         )
 
-        st.subheader("Customize Demographic Visualization")
-        ctrl_col1, ctrl_col2 = st.columns(2)
-        with ctrl_col1:
-            demo_chart_choice = st.selectbox(
-                "Select Demographic Graph Dimension:",
-                options=[
-                    "Voter Age Cohorts (Opportunity Gap Analysis - Least Viewed in NC)",
-                    "Gender Targeting Distribution",
-                    "Cross-Platform Demographic Penetration (Google vs. Meta in NC)"
-                ],
-                index=0,
-                key="demo_chart_select"
+        # Overview KPI Row
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+        with kpi1:
+            st.markdown(
+                f"""<div class="metric-card">
+                    <div class="metric-label">Total NC Spend (2024+)</div>
+                    <div class="metric-value">${total_spend:,.0f}</div>
+                </div>""",
+                unsafe_allow_html=True
             )
-        with ctrl_col2:
-            demo_metric_choice = st.selectbox(
-                "Select Graph Metric (Y-Axis):",
-                options=[
-                    "Estimated Impressions",
-                    "Estimated Spend ($ USD)",
-                    "Number of Ad Creatives"
-                ],
-                index=0,
-                key="demo_metric_select"
+        with kpi2:
+            st.markdown(
+                f"""<div class="metric-card">
+                    <div class="metric-label">Delivered Impressions</div>
+                    <div class="metric-value">{total_impressions:,.0f}</div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+        with kpi3:
+            st.markdown(
+                f"""<div class="metric-card">
+                    <div class="metric-label">Active Ad Creatives</div>
+                    <div class="metric-value">{total_ads:,}</div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+        with kpi4:
+            st.markdown(
+                f"""<div class="metric-card">
+                    <div class="metric-label">🚨 Top Demographic Gap</div>
+                    <div class="metric-value" style="color: #ef4444;">{least_viewed_cohort}</div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+        with kpi5:
+            st.markdown(
+                f"""<div class="metric-card">
+                    <div class="metric-label">🗺️ Epicenter NC Market</div>
+                    <div class="metric-value" style="color: #f59e0b;">{top_spend_dma.replace(' DMA', '')}</div>
+                </div>""",
+                unsafe_allow_html=True
             )
 
-        if demo_chart_choice == "Voter Age Cohorts (Opportunity Gap Analysis - Least Viewed in NC)":
-            gap_chart = create_nc_demographic_gap_chart(unnested_demo, metric_label=demo_metric_choice)
-            st.altair_chart(gap_chart, use_container_width=True, theme="streamlit")
-        elif demo_chart_choice == "Gender Targeting Distribution":
-            gender_chart = create_nc_gender_breakdown_chart(filtered_df, metric_label=demo_metric_choice)
-            st.altair_chart(gender_chart, use_container_width=True, theme="streamlit")
-        else:
-            cross_chart = create_nc_cross_platform_demographic_chart(unnested_demo, metric_label=demo_metric_choice)
-            st.altair_chart(cross_chart, use_container_width=True, theme="streamlit")
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        with st.expander("📊 View Detailed North Carolina Demographic Data Table"):
-            summary_table = (
-                unnested_demo.groupby("age_targeting")
+        # Macro Visualizations Row 1
+        st.subheader("Macro Digital Spend Allocation & Regional Focus")
+        col_ov1, col_ov2 = st.columns(2)
+        with col_ov1:
+            platform_comp = create_nc_platform_comparison_chart(filtered_df)
+            st.altair_chart(platform_comp, width="stretch", theme="streamlit")
+        with col_ov2:
+            dma_ov_chart = create_nc_dma_ranking_chart(cleaned_geo, metric_label="Total Spend ($ USD)")
+            st.altair_chart(dma_ov_chart, width="stretch", theme="streamlit")
+
+        # Macro Visualizations Row 2
+        st.subheader("Competitor Landscape & Creative Inventory Overview")
+        col_ov3, col_ov4 = st.columns(2)
+        with col_ov3:
+            top_spenders_chart = create_top_spenders_overview_chart(filtered_df, top_n=8)
+            st.altair_chart(top_spenders_chart, width="stretch", theme="streamlit")
+        with col_ov4:
+            format_ov_chart = create_nc_format_efficiency_chart(filtered_df)
+            st.altair_chart(format_ov_chart, width="stretch", theme="streamlit")
+
+        # Executive Tactical Briefing Card
+        st.markdown(
+            f"""
+            <div class="insight-card">
+                <h4>📋 Executive Campaign Intelligence Briefing: North Carolina Battleground</h4>
+                <ul>
+                    <li><strong>Capital Commitment:</strong> Tracked digital expenditure across Google and Meta in North Carolina totals <strong>${total_spend:,.2f}</strong> across <strong>{total_ads:,} active ad creatives</strong> from January 1, 2024 to current.</li>
+                    <li><strong>Market Saturation Epicenter:</strong> <strong>{top_spend_dma}</strong> dominates total spending (${top_dma_val:,.0f}), representing the central battleground for media dominance between Charlotte and the Triangle.</li>
+                    <li><strong>Leading Competitor Spender:</strong> <strong>{leading_spender}</strong> leads all organizations in digital ad spend with <strong>${leading_spender_val:,.0f}</strong> deployed across North Carolina voters.</li>
+                    <li><strong>Primary Mobilization Gap:</strong> The <strong>{least_viewed_cohort}</strong> voter cohort receives the lowest proportion of ad impressions across campaigns, indicating an urgent opportunity for targeted turnout outreach.</li>
+                    <li><strong>Format Priority:</strong> Video advertising accounts for the vast majority of impression volume on both Google YouTube and Meta social feeds, underscoring the necessity of short-form, high-recall audiovisual messaging.</li>
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        with st.expander("📊 View Top 10 Competitors Spending Ledger in North Carolina"):
+            top_10_table = (
+                filtered_df.groupby(["advertiser_name", "platform"], as_index=False)
                 .agg(
-                    Total_Impressions=("impressions_est", "sum"),
                     Total_Spend_USD=("spend_usd_est", "sum"),
-                    Total_Ads=("ad_id", "count")
+                    Total_Impressions=("impressions_est", "sum"),
+                    Creatives_Count=("ad_id", "nunique")
                 )
-                .sort_values(by="Total_Impressions", ascending=True)
-                .reset_index()
+                .sort_values(by="Total_Spend_USD", ascending=False)
+                .head(10)
             )
-            summary_table["Impression_Share"] = (summary_table["Total_Impressions"] / summary_table["Total_Impressions"].sum()) * 100
             st.dataframe(
-                summary_table.style.format({
-                    "Total_Impressions": "{:,.0f}",
+                top_10_table.style.format({
                     "Total_Spend_USD": "${:,.2f}",
-                    "Total_Ads": "{:,}",
-                    "Impression_Share": "{:.2f}%"
+                    "Total_Impressions": "{:,.0f}",
+                    "Creatives_Count": "{:,}"
                 }),
-                use_container_width=True
+                width="stretch",
+                hide_index=True
             )
 
-    # -----------------------------------------------------------
-    # TAB 2: Targeted Ad Content & Formats (Age & Gender Filter)
-    # -----------------------------------------------------------
-    with tab2:
+    # =========================================================================
+    # TAB 2: DEMOGRAPHIC OPPORTUNITY & GAP ANALYSIS (NC)
+    # Keeping Google BigQuery and Meta API Data STRICTLY SEPARATE
+    # =========================================================================
+    with tab_demo:
         st.markdown(
             """<div class="info-box">
-                <strong>Targeted Creative Intelligence:</strong> Select specific <strong>voter age groups</strong> 
-                and <strong>gender segments</strong> to analyze what types of ads (Video, Image, Text) are being deployed 
-                to them across North Carolina, evaluate CPM delivery efficiency, and inspect active creative messaging.
+                <strong>Demographic Intelligence Architecture:</strong> To preserve analytical rigor, 
+                <strong>Google Ads</strong> data (advertiser targeting parameters from BigQuery) and 
+                <strong>Meta Ad Library</strong> data (empirical audience delivery from Meta Graph API) 
+                are kept strictly separate. Review platform-specific breakdowns and data-driven strategic insights below.
             </div>""",
             unsafe_allow_html=True
         )
 
-        st.subheader("Filter Target Demographic for Creative Analysis")
-        filter_col1, filter_col2, filter_col3 = st.columns(3)
-        with filter_col1:
-            client_age = st.selectbox(
-                "Select Target Age Group:",
-                options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65"],
-                index=0,
-                key="client_target_age"
-            )
-        with filter_col2:
-            client_gender = st.selectbox(
-                "Select Target Gender Segment:",
-                options=["All Genders", "Female", "Male", "Broad / Untargeted"],
-                index=0,
-                key="client_target_gender"
-            )
-        with filter_col3:
-            client_metric = st.selectbox(
-                "Select Measure:",
-                options=["Estimated Spend ($ USD)", "Estimated Impressions", "Number of Ad Creatives"],
-                index=0,
-                key="client_target_metric"
+        demo_sub1, demo_sub2, demo_sub3 = st.tabs([
+            "🔵 Google Political Ads Demographics (BigQuery)",
+            "🔷 Meta Ads Audience Delivery (Meta API)",
+            "⚖️ Cross-Platform Comparative Strategic Insights"
+        ])
+
+        # ----------------- SUBTAB 1: Google Political Ads -----------------
+        with demo_sub1:
+            st.markdown(
+                f"""<div class="alert-box">
+                    <strong>Google Opportunity Gap Alert:</strong> In North Carolina, the <strong>{least_viewed_cohort}</strong> 
+                    voter cohort receives the fewest ad impressions across all active Google campaigns from 2024 to current. 
+                    Targeted digital buys must be mobilized to close voter turnout blind spots left open by competitor campaigns.
+                </div>""",
+                unsafe_allow_html=True
             )
 
-        demo_filtered_creatives = filter_creatives_by_demographic(filtered_df, selected_age=client_age, selected_gender=client_gender)
+            g_ctrl1, g_ctrl2 = st.columns(2)
+            with g_ctrl1:
+                g_demo_choice = st.selectbox(
+                    "Select Google Demographic Dimension:",
+                    options=[
+                        "Voter Age Cohorts (Google Targeting Opportunity Gap)",
+                        "Gender Targeting Distribution (Google Ads)"
+                    ],
+                    index=0,
+                    key="g_demo_choice_select"
+                )
+            with g_ctrl2:
+                g_metric_choice = st.selectbox(
+                    "Select Metric (Y-Axis):",
+                    options=[
+                        "Estimated Impressions",
+                        "Estimated Spend ($ USD)",
+                        "Number of Ad Creatives"
+                    ],
+                    index=0,
+                    key="g_metric_choice_select"
+                )
 
-        st.markdown(f"**Found {len(demo_filtered_creatives):,} ad creatives** targeted to **{client_age}** | **{client_gender}** voters in North Carolina.")
+            if g_demo_choice == "Voter Age Cohorts (Google Targeting Opportunity Gap)":
+                g_chart = create_nc_demographic_gap_chart(unnested_demo, metric_label=g_metric_choice)
+                st.altair_chart(g_chart, width="stretch", theme="streamlit")
+            else:
+                unnested_gender = unnest_demographics(clean_bq, "gender_targeting")
+                g_gender_chart = create_nc_gender_breakdown_chart(unnested_gender, metric_label=g_metric_choice)
+                st.altair_chart(g_gender_chart, width="stretch", theme="streamlit")
 
-        c_col1, c_col2 = st.columns(2)
-        with c_col1:
-            format_dist_chart = create_demographic_format_distribution_chart(
-                demo_filtered_creatives,
-                selected_age=client_age,
-                selected_gender=client_gender,
-                metric_label=client_metric
+            g_insights = generate_google_demographic_insights(clean_bq)
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <h4>🎯 Strategic Campaign Insights: Google Political Ads Targeting</h4>
+                    <ul>
+                        {''.join([f'<li>{ins}</li>' for ins in g_insights])}
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
-            st.altair_chart(format_dist_chart, use_container_width=True, theme="streamlit")
 
-        with c_col2:
-            cpm_eff_chart = create_format_cpm_efficiency_chart(
-                demo_filtered_creatives,
-                selected_age=client_age,
-                selected_gender=client_gender
+            with st.expander("📊 View Google Demographic Targeting Data Table"):
+                g_table = (
+                    unnested_demo.groupby("age_targeting", as_index=False)
+                    .agg(
+                        Impressions=("impressions_est", "sum"),
+                        Spend_USD=("spend_usd_est", "sum"),
+                        Ad_Count=("ad_id", "count")
+                    )
+                    .sort_values(by="Impressions", ascending=False)
+                )
+                st.dataframe(
+                    g_table.style.format({
+                        "Impressions": "{:,.0f}",
+                        "Spend_USD": "${:,.2f}",
+                        "Ad_Count": "{:,}"
+                    }),
+                    width="stretch"
+                )
+
+        # ----------------- SUBTAB 2: Meta Ads Audience Delivery -----------------
+        with demo_sub2:
+            st.markdown(
+                """<div class="info-box">
+                    <strong>Meta Empirical Audience Delivery:</strong> Meta Ad Library data tracks 
+                    <strong>actual audience impressions</strong> delivered across Facebook and Instagram via 
+                    <code>demographic_distribution</code>, providing empirical verification of audience reach.
+                </div>""",
+                unsafe_allow_html=True
             )
-            st.altair_chart(cpm_eff_chart, use_container_width=True, theme="streamlit")
 
-        st.subheader(f"Inspect Active Ad Creatives for [{client_age} | {client_gender}]")
-        st.markdown("Review the actual political ad creatives and transparency disclosure links to evaluate messaging content:")
+            m_ctrl1, m_ctrl2 = st.columns(2)
+            with m_ctrl1:
+                m_demo_choice = st.selectbox(
+                    "Select Meta Delivery Dimension:",
+                    options=[
+                        "Delivered Reach by Age Cohort (Meta API)",
+                        "Gender Reach Distribution (Meta API)"
+                    ],
+                    index=0,
+                    key="m_demo_choice_select"
+                )
+            with m_ctrl2:
+                m_metric_choice = st.selectbox(
+                    "Select Metric:",
+                    options=[
+                        "Delivered Impressions",
+                        "Delivered Spend ($ USD)",
+                        "Number of Ad Creatives"
+                    ],
+                    index=0,
+                    key="m_metric_choice_select"
+                )
 
-        display_cols = ["ad_id", "advertiser_name", "ad_type", "platform", "spend_usd_est", "impressions_est", "duration_days", "ad_url"]
-        available_cols = [c for c in display_cols if c in demo_filtered_creatives.columns]
-        sample_creatives = demo_filtered_creatives[available_cols].head(25).copy()
+            if m_demo_choice == "Delivered Reach by Age Cohort (Meta API)":
+                m_chart = create_meta_demographic_delivery_chart(df_meta_demo, metric_label=m_metric_choice)
+                st.altair_chart(m_chart, width="stretch", theme="streamlit")
+            else:
+                m_gender_chart = create_meta_gender_reach_chart(df_meta_demo, metric_label=m_metric_choice)
+                st.altair_chart(m_gender_chart, width="stretch", theme="streamlit")
 
-        st.dataframe(
-            sample_creatives,
-            column_config={
-                "ad_url": st.column_config.LinkColumn("Ad Transparency URL", display_text="View Ad Content ↗"),
-                "spend_usd_est": st.column_config.NumberColumn("Est. Spend ($)", format="$%.2f"),
-                "impressions_est": st.column_config.NumberColumn("Est. Impressions", format="%d"),
-                "duration_days": st.column_config.NumberColumn("Days Active", format="%d days"),
-                "advertiser_name": "Sponsoring PAC / Campaign",
-                "ad_type": "Ad Format",
-                "platform": "Platform"
-            },
-            use_container_width=True,
-            hide_index=True
-        )
+            m_insights = generate_meta_demographic_insights(df_meta_demo)
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <h4>🎯 Strategic Campaign Insights: Meta Audience Delivery</h4>
+                    <ul>
+                        {''.join([f'<li>{ins}</li>' for ins in m_insights])}
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-    # -----------------------------------------------------------
-    # TAB 3: Regional Competitor Spend & NC County Heatmap
-    # -----------------------------------------------------------
-    with tab3:
+            with st.expander("📊 View Meta Audience Delivery Data Table"):
+                if not df_meta_demo.empty:
+                    m_table = (
+                        df_meta_demo.groupby(["age_group", "gender"], as_index=False)
+                        .agg(
+                            Delivered_Impressions=("demographic_impressions", "sum"),
+                            Delivered_Spend_USD=("demographic_spend_usd", "sum"),
+                            Ad_Count=("ad_id", "nunique")
+                        )
+                        .sort_values(by="Delivered_Impressions", ascending=False)
+                    )
+                    st.dataframe(
+                        m_table.style.format({
+                            "Delivered_Impressions": "{:,.0f}",
+                            "Delivered_Spend_USD": "${:,.2f}",
+                            "Ad_Count": "{:,}"
+                        }),
+                        width="stretch"
+                    )
+
+        # ----------------- SUBTAB 3: Cross-Platform Insights -----------------
+        with demo_sub3:
+            st.markdown(
+                """<div class="success-box">
+                    <strong>Cross-Platform Strategic Blueprint:</strong> Comparing Google targeting volume against Meta audience delivery 
+                    exposes where rival campaigns are over-saturating certain demographics while leaving critical voter cohorts untouched.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            cross_chart = create_nc_cross_platform_demographic_chart(unnested_demo, metric_label="Estimated Impressions")
+            st.altair_chart(cross_chart, width="stretch", theme="streamlit")
+
+            cross_insights = generate_cross_platform_strategic_insights(clean_bq, df_meta_demo)
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <h4>🎯 Campaign Action Recommendations: Cross-Platform Digital Allocation</h4>
+                    <ul>
+                        {''.join([f'<li>{ins}</li>' for ins in cross_insights])}
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    # =========================================================================
+    # TAB 3: TARGETED AD FORMATS & CREATIVE INTELLIGENCE
+    # STRICTLY SEPARATING GOOGLE BIGQUERY & META AD LIBRARY SUBSECTIONS
+    # =========================================================================
+    with tab_creative:
         st.markdown(
             """<div class="info-box">
-                <strong>NC Regional & County Strategy:</strong> Tracking political ad expenditure across North Carolina's 
+                <strong>Ad Format & Creative Intelligence Architecture:</strong> This section is dedicated to analyzing 
+                what types of ads (<strong>Video</strong>, <strong>Image</strong>, <strong>Text</strong>) are being displayed across North Carolina. 
+                To ensure platform clarity and prevent conflation between Google's ad network parameters and Meta's social delivery metrics, 
+                data is strictly divided into two distinct subsections: <strong>Google Political Ads (BigQuery)</strong> and <strong>Meta Ad Library (Meta API)</strong>.
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+        creative_sub1, creative_sub2 = st.tabs([
+            "🔵 Google Political Ads Formats (BigQuery)",
+            "🔷 Meta Ad Library Formats (Meta API)"
+        ])
+
+        # -------------------------------------------------------------
+        # SUBSECTION A: GOOGLE POLITICAL ADS (BIGQUERY)
+        # -------------------------------------------------------------
+        with creative_sub1:
+            st.markdown(
+                """<div class="info-box">
+                    <strong>Google Ad Creative Formats (BigQuery):</strong> Analyzes ad creative formats 
+                    (<strong>YouTube Video</strong>, <strong>Display Images</strong>, and <strong>Search Text</strong>) 
+                    from the Google Political Ads transparency dataset in BigQuery. Filter by targeted demographic cohorts to evaluate format distribution and CPM efficiency.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            # Isolate Google creatives from filtered_df or fallback to clean_bq
+            google_creatives = filtered_df[filtered_df["platform"] == "Google"]
+            if google_creatives.empty:
+                google_creatives = clean_bq
+
+            st.subheader("Filter Google Ad Targeting Parameters")
+            g_f1, g_f2, g_f3 = st.columns(3)
+            with g_f1:
+                g_filter_age = st.selectbox(
+                    "Target Age Group (Google):",
+                    options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65", "Broad / Untargeted"],
+                    index=0,
+                    key="g_creative_target_age"
+                )
+            with g_f2:
+                g_filter_gender = st.selectbox(
+                    "Target Gender Segment (Google):",
+                    options=["All Genders", "Female", "Male", "Broad / Untargeted"],
+                    index=0,
+                    key="g_creative_target_gender"
+                )
+            with g_f3:
+                g_filter_metric = st.selectbox(
+                    "Measure (Y-Axis):",
+                    options=["Estimated Spend ($ USD)", "Estimated Impressions", "Number of Ad Creatives"],
+                    index=0,
+                    key="g_creative_target_metric"
+                )
+
+            filtered_google = filter_google_creatives(
+                google_creatives,
+                selected_age=g_filter_age,
+                selected_gender=g_filter_gender
+            )
+
+            g_total_creatives = len(filtered_google)
+            g_video_count = len(filtered_google[filtered_google["ad_type"].astype(str).str.upper() == "VIDEO"])
+            g_video_pct = (g_video_count / g_total_creatives * 100) if g_total_creatives > 0 else 0.0
+            g_total_spend = filtered_google["spend_usd_est"].sum()
+            g_video_spend = filtered_google[filtered_google["ad_type"].astype(str).str.upper() == "VIDEO"]["spend_usd_est"].sum()
+            g_video_spend_pct = (g_video_spend / g_total_spend * 100) if g_total_spend > 0 else 0.0
+
+            st.markdown(
+                f"""<div class="success-box">
+                    <strong>Google Finding for [{g_filter_age} | {g_filter_gender}]:</strong> 
+                    Found <strong>{g_total_creatives:,} active creatives</strong>. 
+                    <strong>YouTube Video represents {g_video_spend_pct:.1f}% (${g_video_spend:,.0f})</strong> of total spend 
+                    targeting this demographic, demonstrating campaigns' heavy reliance on video persuasion on Google.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            g_col1, g_col2 = st.columns(2)
+            with g_col1:
+                g_dist_chart = create_google_format_distribution_chart(
+                    filtered_google,
+                    metric_label=g_filter_metric,
+                    selected_age=g_filter_age,
+                    selected_gender=g_filter_gender
+                )
+                st.altair_chart(g_dist_chart, width="stretch", theme="streamlit")
+
+            with g_col2:
+                g_cpm_chart = create_google_format_cpm_chart(
+                    filtered_google,
+                    selected_age=g_filter_age,
+                    selected_gender=g_filter_gender
+                )
+                st.altair_chart(g_cpm_chart, width="stretch", theme="streamlit")
+
+            # Automated Google Creative Strategic Insights
+            g_creative_insights = generate_google_creative_insights(filtered_google)
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <h4>🎯 Strategic Campaign Insights: Google Format Allocation & CPM Cost Efficiency</h4>
+                    <ul>
+                        {''.join([f'<li>{ins}</li>' for ins in g_creative_insights])}
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.subheader(f"Inspect Google Ad Creatives & Transparency Disclosures for [{g_filter_age} | {g_filter_gender}]")
+            st.markdown("Direct links to Google Political Ads Transparency Reports to inspect video flights, search headlines, and banner designs:")
+
+            g_disp_cols = ["ad_id", "advertiser_name", "ad_type", "spend_usd_est", "impressions_est", "duration_days", "age_targeting", "gender_targeting", "ad_url"]
+            g_avail_cols = [c for c in g_disp_cols if c in filtered_google.columns]
+            g_samples = filtered_google[g_avail_cols].head(30).copy()
+
+            st.dataframe(
+                g_samples,
+                column_config={
+                    "ad_url": st.column_config.LinkColumn("Google Transparency Link", display_text="View on Google ↗"),
+                    "spend_usd_est": st.column_config.NumberColumn("Est. Spend ($)", format="$%.2f"),
+                    "impressions_est": st.column_config.NumberColumn("Est. Impressions", format="%d"),
+                    "duration_days": st.column_config.NumberColumn("Flight Days", format="%d days"),
+                    "advertiser_name": "PAC / Campaign",
+                    "ad_type": "Format",
+                    "age_targeting": "Age Targeting",
+                    "gender_targeting": "Gender Targeting"
+                },
+                width="stretch",
+                hide_index=True
+            )
+
+        # -------------------------------------------------------------
+        # SUBSECTION B: META AD LIBRARY (META API)
+        # -------------------------------------------------------------
+        with creative_sub2:
+            st.markdown(
+                """<div class="info-box">
+                    <strong>Meta Ad Creative & Video Intelligence (Meta API):</strong> Using the 
+                    <strong>Facebook / Meta Ad Library API</strong> (specifically <code>demographic_distribution</code> 
+                    and creative asset metadata), this section analyzes what types of ads (<strong>Video</strong>, <strong>Image</strong>, <strong>Text</strong>) 
+                    are delivered to each age and gender demographic across North Carolina. Select target cohorts to determine what content applies best.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            st.subheader("Filter Target Demographic for Meta Video & Creative Format Analysis")
+            m_f1, m_f2, m_f3 = st.columns(3)
+            with m_f1:
+                m_filter_age = st.selectbox(
+                    "Target Age Group (Meta):",
+                    options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65"],
+                    index=0,
+                    key="m_creative_target_age"
+                )
+            with m_f2:
+                m_filter_gender = st.selectbox(
+                    "Target Gender Segment (Meta):",
+                    options=["All Genders", "Female", "Male"],
+                    index=0,
+                    key="m_creative_target_gender"
+                )
+            with m_f3:
+                m_filter_metric = st.selectbox(
+                    "Select Measure (Meta):",
+                    options=["Delivered Impressions", "Delivered Spend ($ USD)", "Number of Ad Creatives"],
+                    index=0,
+                    key="m_creative_target_metric"
+                )
+
+            filtered_meta_demo = filter_meta_demographics(
+                df_meta_demo,
+                selected_age=m_filter_age,
+                selected_gender=m_filter_gender
+            )
+
+            m_tot_imps = filtered_meta_demo["demographic_impressions"].sum()
+            m_vid_imps = filtered_meta_demo[filtered_meta_demo["ad_type"] == "VIDEO"]["demographic_impressions"].sum()
+            m_vid_pct = (m_vid_imps / m_tot_imps * 100) if m_tot_imps > 0 else 0.0
+
+            st.markdown(
+                f"""<div class="success-box">
+                    <strong>Meta Delivery Finding for [{m_filter_age} | {m_filter_gender}]:</strong> 
+                    Delivered <strong>{m_tot_imps:,.0f} impressions</strong> to this voter cohort. 
+                    <strong>Video Ads generate {m_vid_pct:.1f}%</strong> of total audience impressions delivered to this North Carolina segment, 
+                    reinforcing high engagement for short-form video in Meta feeds and Reels.
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            m_col1, m_col2 = st.columns(2)
+            with m_col1:
+                m_format_chart = create_meta_demographic_format_chart(
+                    filtered_meta_demo,
+                    metric_label=m_filter_metric,
+                    selected_age=m_filter_age,
+                    selected_gender=m_filter_gender
+                )
+                st.altair_chart(m_format_chart, width="stretch", theme="streamlit")
+
+            with m_col2:
+                m_cpm_chart = create_meta_format_cpm_chart(
+                    filtered_meta_demo,
+                    selected_age=m_filter_age,
+                    selected_gender=m_filter_gender
+                )
+                st.altair_chart(m_cpm_chart, width="stretch", theme="streamlit")
+
+            # Demographic Video Distribution Across Age Groups & Genders (Meta API)
+            st.subheader("Demographic Video Adoption Curve Across North Carolina Voters (Meta API)")
+            if not df_meta_demo.empty:
+                v_col1, v_col2 = st.columns(2)
+                with v_col1:
+                    video_adoption_chart = create_video_adoption_by_demographic_chart(df_meta_demo)
+                    st.altair_chart(video_adoption_chart, width="stretch", theme="streamlit")
+                with v_col2:
+                    gender_breakdown_chart = create_gender_video_breakdown_chart(df_meta_demo)
+                    st.altair_chart(gender_breakdown_chart, width="stretch", theme="streamlit")
+
+            # Automated Meta Creative Strategic Insights
+            m_creative_insights = generate_meta_creative_insights(df_meta_demo)
+            st.markdown(
+                f"""
+                <div class="insight-card">
+                    <h4>🎯 Strategic Campaign Insights: Meta Creative Video Optimization</h4>
+                    <ul>
+                        {''.join([f'<li>{ins}</li>' for ins in m_creative_insights])}
+                    </ul>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.subheader(f"Inspect Meta Ad Creatives & Video Messaging for [{m_filter_age} | {m_filter_gender}]")
+            st.markdown("Review the actual Meta political ad creatives, video titles, and live ad snapshot URLs to evaluate messaging content:")
+
+            # Isolate Meta creatives table
+            meta_creatives = filtered_df[filtered_df["platform"] == "Meta"]
+            if meta_creatives.empty:
+                meta_creatives = clean_meta
+
+            m_display_cols = ["ad_id", "advertiser_name", "ad_type", "ad_creative_link_titles", "ad_creative_bodies", "spend_usd_est", "impressions_est", "duration_days", "ad_snapshot_url"]
+            m_avail_cols = [c for c in m_display_cols if c in meta_creatives.columns]
+            m_sample_creatives = meta_creatives[m_avail_cols].head(30).copy()
+
+            st.dataframe(
+                m_sample_creatives,
+                column_config={
+                    "ad_snapshot_url": st.column_config.LinkColumn("Ad Snapshot URL", display_text="View on Meta ↗"),
+                    "spend_usd_est": st.column_config.NumberColumn("Est. Spend ($)", format="$%.2f"),
+                    "impressions_est": st.column_config.NumberColumn("Est. Impressions", format="%d"),
+                    "duration_days": st.column_config.NumberColumn("Days Active", format="%d days"),
+                    "advertiser_name": "Sponsoring PAC / Campaign",
+                    "ad_type": "Format",
+                    "ad_creative_link_titles": "Ad Title / Headline",
+                    "ad_creative_bodies": "Creative Message Body"
+                },
+                width="stretch",
+                hide_index=True
+            )
+
+    # =========================================================================
+    # TAB 4: REGIONAL COMPETITOR SPEND & NC COUNTY HEATMAP
+    # Clean HTML Component Rendering for NC Map Heatmap
+    # =========================================================================
+    with tab_geo:
+        st.markdown(
+            """<div class="info-box">
+                <strong>NC Regional & County Heatmap Intelligence:</strong> Tracking political ad expenditure across North Carolina's 
                 counties and 6 primary Designated Market Areas (DMAs) exposes regional spending epicenters 
                 (such as Mecklenburg and Wake counties) and highlights underserved counties for strategic campaign outreach.
             </div>""",
@@ -466,7 +937,9 @@ def main():
             geo_chart_choice = st.selectbox(
                 "Select Regional Graph Dimension:",
                 options=[
-                    "NC County Spend Heatmap (Ranked Intensity)",
+                    "NC County Heatmap (Applied Over NC Counties Map Image)",
+                    "NC County Spatial Coordinate Heatmap",
+                    "NC County Spend Heatmap (Ranked Intensity Bar)",
                     "NC County Geographic Heatmap (Choropleth Map)",
                     "NC Media Market (DMA) Intensity Ranking",
                     "Competitor PAC Breakdown by NC Market",
@@ -487,39 +960,49 @@ def main():
                 key="geo_metric_select"
             )
 
-        if geo_chart_choice == "NC County Spend Heatmap (Ranked Intensity)":
-            if not df_county.empty:
-                top_county = df_county.sort_values(by="spend_usd", ascending=False).iloc[0]
-                sec_county = df_county.sort_values(by="spend_usd", ascending=False).iloc[1] if len(df_county) > 1 else top_county
-                rural_count = len(df_county[df_county["spend_tier"] == "⚪ Low"])
-                
-                c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
-                with c_kpi1:
-                    st.metric("Top County Spender", f"{top_county['county_name']} County", f"${top_county['spend_usd']:,.0f}")
-                with c_kpi2:
-                    st.metric("Runner-Up County", f"{sec_county['county_name']} County", f"${sec_county['spend_usd']:,.0f}")
-                with c_kpi3:
-                    st.metric("Under-Targeted Counties", f"{rural_count} Counties", "⚪ Low Tier Outreach Target")
+        # Top summary KPIs for counties
+        if not df_county.empty:
+            top_county = df_county.sort_values(by="spend_usd", ascending=False).iloc[0]
+            sec_county = df_county.sort_values(by="spend_usd", ascending=False).iloc[1] if len(df_county) > 1 else top_county
+            rural_count = len(df_county[df_county["spend_tier"] == "⚪ Low"])
+            
+            c_kpi1, c_kpi2, c_kpi3 = st.columns(3)
+            with c_kpi1:
+                st.metric("Top County Spender", f"{top_county['county_name']} County", f"${top_county['spend_usd']:,.0f}")
+            with c_kpi2:
+                st.metric("Runner-Up County", f"{sec_county['county_name']} County", f"${sec_county['spend_usd']:,.0f}")
+            with c_kpi3:
+                st.metric("Under-Targeted Counties", f"{rural_count} Counties", "⚪ Low Tier Outreach Target")
 
+        if geo_chart_choice == "NC County Heatmap (Applied Over NC Counties Map Image)":
+            # Render cleanly using Streamlit Components HTML to prevent raw code escaping
+            svg_html = generate_nc_county_map_heatmap_svg(df_county, metric_label=geo_metric_choice)
+            components.html(svg_html, height=460, scrolling=False)
+
+        elif geo_chart_choice == "NC County Spatial Coordinate Heatmap":
+            spatial_map = create_nc_county_spatial_heatmap_chart(df_county, metric_label=geo_metric_choice)
+            st.altair_chart(spatial_map, width="stretch", theme="streamlit")
+
+        elif geo_chart_choice == "NC County Spend Heatmap (Ranked Intensity Bar)":
             county_heatmap = create_nc_county_heatmap_chart(df_county, metric_label=geo_metric_choice)
-            st.altair_chart(county_heatmap, use_container_width=True, theme="streamlit")
+            st.altair_chart(county_heatmap, width="stretch", theme="streamlit")
 
         elif geo_chart_choice == "NC County Geographic Heatmap (Choropleth Map)":
             st.markdown("Geographic distribution of advertising expenditures across North Carolina counties:")
             choropleth_map = create_nc_county_choropleth_chart(df_county, metric_label=geo_metric_choice)
-            st.altair_chart(choropleth_map, use_container_width=True, theme="streamlit")
+            st.altair_chart(choropleth_map, width="stretch", theme="streamlit")
 
         elif geo_chart_choice == "NC Media Market (DMA) Intensity Ranking":
             dma_chart = create_nc_dma_ranking_chart(cleaned_geo, metric_label=geo_metric_choice)
-            st.altair_chart(dma_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(dma_chart, width="stretch", theme="streamlit")
 
         elif geo_chart_choice == "Competitor PAC Breakdown by NC Market":
             breakdown_chart = create_nc_advertiser_breakdown_chart(cleaned_geo, metric_label=geo_metric_choice)
-            st.altair_chart(breakdown_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(breakdown_chart, width="stretch", theme="streamlit")
 
         else:
             share_chart = create_nc_market_share_chart(cleaned_geo)
-            st.altair_chart(share_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(share_chart, width="stretch", theme="streamlit")
 
         with st.expander("📍 View North Carolina County & Market Spending Details"):
             exp_tab1, exp_tab2 = st.tabs(["🏛️ NC County Spending Ledger", "📺 NC Media Market Breakdown"])
@@ -534,7 +1017,7 @@ def main():
                         "impressions_est": st.column_config.NumberColumn("Est. Impressions", format="%d"),
                         "fips": "FIPS Code"
                     },
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
             with exp_tab2:
@@ -545,13 +1028,13 @@ def main():
                 )
                 st.dataframe(
                     geo_summary.style.format({"spend_usd": "${:,.2f}"}),
-                    use_container_width=True
+                    width="stretch"
                 )
 
-    # -----------------------------------------------------------
-    # TAB 4: Platform Performance & Pacing (NC)
-    # -----------------------------------------------------------
-    with tab4:
+    # =========================================================================
+    # TAB 5: PLATFORM PERFORMANCE & PACING (2024–Current)
+    # =========================================================================
+    with tab_pace:
         st.subheader("Customize Spending Trajectory & Performance Graph")
         pace_col1, pace_col2 = st.columns(2)
         with pace_col1:
@@ -567,36 +1050,36 @@ def main():
                 key="pace_view_select"
             )
         with pace_col2:
-            st.info("Pacing graphs reflect investment trajectory in North Carolina up to the election.")
+            st.info("Pacing graphs reflect investment trajectory in North Carolina from 2024 to the election.")
 
         if pace_view_choice in ["Weekly Expenditure Pace", "Cumulative Spend Trajectory"]:
             trajectory_chart = create_nc_spend_trajectory_chart(cleaned_weekly, view_mode=pace_view_choice)
-            st.altair_chart(trajectory_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(trajectory_chart, width="stretch", theme="streamlit")
         elif pace_view_choice == "Platform Allocation (Google vs. Meta in NC)":
             comp_chart = create_nc_platform_comparison_chart(filtered_df)
-            st.altair_chart(comp_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(comp_chart, width="stretch", theme="streamlit")
         else:
             format_chart = create_nc_format_efficiency_chart(filtered_df)
-            st.altair_chart(format_chart, use_container_width=True, theme="streamlit")
+            st.altair_chart(format_chart, width="stretch", theme="streamlit")
 
-    # -----------------------------------------------------------
-    # TAB 5: Key Dataset Facts & Methodology
-    # -----------------------------------------------------------
-    with tab5:
+    # =========================================================================
+    # TAB 6: KEY DATASET FACTS & METHODOLOGY
+    # =========================================================================
+    with tab_info:
         st.markdown("### 📋 Key Facts About the North Carolina Political Ads Dataset")
 
         f1, f2 = st.columns(2)
         with f1:
             st.markdown("""
-            #### 1. Geographic Scope: North Carolina Focus
-            * **Target Media Markets (DMAs):** Analysis is strictly bounded to North Carolina's 6 designated media markets:
+            #### 1. Geographic & Temporal Scope (NC, 2024–Current)
+            * **North Carolina Only:** Analysis is strictly bounded to North Carolina voters and its 6 designated media markets:
               * *Charlotte DMA* (Mecklenburg, Union, Gaston, Cabarrus)
               * *Raleigh-Durham-Fayetteville DMA* (Wake, Durham, Cumberland, Orange)
               * *Greensboro-High Point-Winston-Salem DMA* (Piedmont Triad: Guilford, Forsyth)
               * *Greenville-New Bern-Washington DMA* (Eastern NC Coastal Plain)
               * *Wilmington DMA* (New Hanover, Brunswick, Pender)
               * *Asheville DMA* (Western NC Mountains)
-            * **Exclusion of Non-NC Data:** Campaigns and impressions outside North Carolina are strictly filtered out.
+            * **Temporal Scope (2024 to Current):** All ads and spending records are strictly scoped from **January 1, 2024 onward**, capturing the current election cycle.
             """)
 
             st.markdown("""
@@ -607,15 +1090,17 @@ def main():
 
         with f2:
             st.markdown("""
-            #### 3. Demographic Gap Discovery
-            * **Delimited Array Explosion:** Political ads targeting multiple age cohorts (`"18-24, 25-34"`) are exploded into discrete rows.
-            * **Alert Mechanism:** Cohorts with the lowest impression penetration among North Carolina voters are highlighted in **red** to pinpoint under-served groups needing voter mobilization.
+            #### 3. Platform Separation in Demographic & Ad Types Sections
+            * **Demographic Separation:** Google targeting settings and Meta empirical audience delivery distributions are analyzed separately to prevent false equivalencies.
+            * **Ad Types / Formats Separation:** Google BigQuery and Meta Ad Library data are divided into dedicated subsections to clearly differentiate YouTube/Search advertising from Facebook/Instagram social formats.
+            * **Meta API Video & Demographic Breakdown:** The Meta Ad Library API's `demographic_distribution` breakdown is processed to reveal what types of ads (Video vs. Image vs. Text) are delivered to each specific age group and gender segment.
             """)
 
             st.markdown("""
-            #### 4. Range Bucket Estimations
+            #### 4. Range Bucket Estimations & Data Cleaning
             * Impressions reported as ranges (e.g. `10k-25k`, `>1M`) are converted into numerical bounds using regex and midpoint estimation.
             * Spend ranges with open-ended tops are conservatively imputed (`min * 1.5`).
+            * Deduplication is performed on `ad_id` and `(advertiser_id, week_start_date)`.
             """)
 
 
