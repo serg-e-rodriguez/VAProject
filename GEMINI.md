@@ -4,11 +4,12 @@
 You are an expert Python Data Engineer and Visualization Specialist assisting in the **Google Antigravity IDE**.
 - **Project Goal:** Build an interactive Streamlit dashboard to analyze and compare political advertising data from **Google Cloud BigQuery** (Google Political Ads dataset) and the **Facebook / Meta Ad Library API** to drive strategic campaign decision-making.
 - **Geographic Scope (Strictly North Carolina):** The scope of this project is strictly limited to **North Carolina (NC)**. All demographic gap evaluations, competitor spend tracking, and market analyses focus exclusively on North Carolina voters and media markets (DMAs).
+- **Temporal Scope (2024 to Current):** All analysis is strictly scoped to political advertising data from **2024 to current** (January 1, 2024 onward), tracking the latest election cycles, active candidate campaigns, and PAC spending in North Carolina.
 - **Interactive Drop-Down Menu Controls:** The dashboard must empower users to use **drop-down menus (`st.selectbox`)** directly within/above visualization blocks to dynamically control what each graph is showing (e.g. toggling metrics like Spend vs. Impressions vs. Ad Count, or switching between demographic cuts and regional media markets).
 - **Core Analytical Objectives:**
   1. **Demographic Opportunity & Gap Analysis (NC Voters):** Identify which demographic groups (e.g., age cohorts, gender segments) of North Carolina voters are viewing political ads the least, pinpointing under-served voter groups our campaign needs to focus on and prioritize for outreach.
-  2. **Regional Competitor Spend Intelligence (NC Media Markets & County Heatmap):** Map and analyze where competitor campaigns, PACs, and rival advertisers are spending the most money across North Carolina's media markets (DMAs) and counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe). Include an interactive **county-level heatmap of North Carolina** to pinpoint regional spending epicenters, battleground saturation, and geographic spending disparities.
-  3. **Targeted Ad Content & Creative Format Intelligence (Demographic-Specific):** A dedicated section of the dashboard analyzing what types of ads (Video, Image, Text) are being shown across North Carolina. The application must empower the campaign client to select specific **age groups** and **gender segments** to inspect what creative ad formats and content are being served to each group, allowing the campaign to determine what content applies best to each demographic.
+  2. **Regional Competitor Spend Intelligence (NC County Heatmap & Media Markets):** Map and analyze where competitor campaigns, PACs, and rival advertisers are spending the most money across North Carolina's media markets (DMAs) and counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe). Use an **image of North Carolina and its counties and apply a heatmap over that image** to showcase what regions and counties are getting the most attention via spending, pinpointing regional spending epicenters, battleground saturation, and geographic spending disparities.
+  3. **Targeted Video & Creative Ad Content Intelligence via Meta API (Demographic-Specific):** A dedicated section of the dashboard analyzing what types of ads (Video, Image, Text) are being shown across North Carolina. For the video data section, use the **Facebook / Meta Ad Library API** (`demographic_distribution` and creative format metadata) to see what types of ads (specifically video vs. image/text) are being shown to each age and gender demographic, allowing the campaign to determine what content applies best to each demographic.
 - Prioritize **modern, modular code** with clean separation between data extraction, data processing, and UI layout.
 - Explain setup steps and dependency management clearly using the `uv` workflow.
 - Prioritize code readability, performance caching, defensive API handling, and educational value.
@@ -84,8 +85,9 @@ VAProject/
 
 ### Google Cloud BigQuery
 - Target Google Political Ads public data (`bigquery-public-data.google_political_ads`) or dedicated GCP project (`virtualanalytics5122`).
+- **Temporal Filter (2024 to Current):** Always filter BigQuery queries to data from **2024 to current** (`week_start_date >= '2024-01-01'` and `date_range_start >= '2024-01-01'`) to focus strictly on contemporary campaign data and optimize query costs.
 - **Authentication & Setup:** BigQuery queries require Google Cloud authentication. Set the environment variable `GOOGLE_APPLICATION_CREDENTIALS="path/to/service_account.json"` or authenticate via Application Default Credentials (ADC: `gcloud auth application-default login`). Project ID is loaded from `.env` (`GCP_PROJECT_ID="virtualanalytics5122"`).
-- **Cost & Performance:** Always filter queries by dates, regions (`regions = 'US'`), or advertisers to minimize data scanned. Avoid unbound `SELECT *`.
+- **Cost & Performance:** Always filter queries by dates (2024 to current), regions (`regions = 'US'`), or advertisers to minimize data scanned. Avoid unbound `SELECT *`.
 - **Caching:** Cache queries using `@st.cache_data(ttl=3600)` and reuse the client with `@st.cache_resource`.
 
 ### BigQuery Table Layouts & Schema Graph
@@ -150,13 +152,16 @@ erDiagram
 ### Facebook / Meta Ad Library API
 - Endpoint: `https://graph.facebook.com/v21.0/ads_archive` with parameter `ad_type=POLITICAL_AND_ISSUE_ADS`.
 - Use the access token configured via environment variable (`META_AD_TOKEN`).
+- **Temporal Filter (2024 to Current):** Query ads active from **2024 to current** using `ad_delivery_date_min='2024-01-01'`.
+- **Video & Creative Demographic Analysis:** For the section on video data, use the Facebook / Meta API to see what types of ads (Video, Image, Text) are being shown to each age and gender demographic. Fetch `demographic_distribution` (breakdown of audience reach by age bracket and gender), `ad_creative_bodies`, `ad_creative_link_titles`, and `ad_snapshot_url` to inspect what ad formats and videos are delivered to each specific demographic segment.
 - **Rate-Limiting & Pagination:** Paginate using `paging.cursors` defensively with a reasonable limit to prevent rate throttle (HTTP 429).
 - **Caching:** Cache API responses using `@st.cache_data(ttl=1800)`.
 
 ### Data Cleaning & Harmonization Pipeline (`preprocessor.py`)
 To prepare the BigQuery Political Ads and Meta Ad Library data for campaign intelligence, the following rigorous cleaning steps must be applied:
 
-1. **Strict Currency Filtering & North Carolina Scope Restriction:**
+1. **Strict Temporal Filtering (2024 to Current), Currency Filtering & North Carolina Scope Restriction:**
+   - **Filter 2024 to Current:** Filter and retain records strictly from **January 1, 2024 to current** (`date >= '2024-01-01'`), discarding historical ad flights outside this window.
    - **Filter NC Geography:** Restrict records strictly to North Carolina campaigns (`country_subdivision_primary = 'North Carolina'`, `state = 'NC'`, or `geo_targeting_included` targeting North Carolina).
    - **Standardize NC Media Markets (DMAs):** Map geographic targeting to North Carolina's 6 core Designated Market Areas:
      - Charlotte DMA
@@ -187,10 +192,9 @@ To prepare the BigQuery Political Ads and Meta Ad Library data for campaign inte
    - **Geographic Token Standardization:** In `geo_targeting_included` and `geo_spend`, clean redundant location suffixes (e.g., strip `", United States"`, trim whitespace, and standardize full state names to canonical 2-letter USPS postal codes: `"North Carolina"` -> `"NC"`).
    - **Deduplication:** Remove duplicate records on `ad_id` in `creative_stats` and `(advertiser_id, week_start_date)` in `advertiser_weekly_spend`.
 
-4. **Demographic Targeting Unnesting (For Gap & Opportunity Analysis):**
-   - `age_targeting` and `gender_targeting` are stored as comma-delimited strings (e.g., `"18-24, 25-34"`, `"Female, Male"`).
-   - Explode or unnest these delimited values into distinct demographic rows when analyzing audience reach among North Carolina voters.
-   - Flag `"Not targeted"` as `"Broad / Untargeted"` so total impression reach can be benchmarked against targeted cohorts to identify demographic blind spots.
+4. **Demographic Targeting & Format Distribution Unnesting (For Gap Analysis & Meta Video Data):**
+   - For BigQuery data, `age_targeting` and `gender_targeting` are stored as comma-delimited strings (e.g., `"18-24, 25-34"`, `"Female, Male"`). Explode or unnest these delimited values into distinct demographic rows when analyzing audience reach among North Carolina voters. Flag `"Not targeted"` as `"Broad / Untargeted"` so total impression reach can be benchmarked against targeted cohorts to identify demographic blind spots.
+   - For Meta API video and ad creative data, unnest the `demographic_distribution` elements (breakdown percentages across age brackets and genders) and join with ad creative format classifications (Video, Image, Text) to determine the exact distribution of ads and videos shown to each voter cohort.
 
 ## 6. Visualization & Analytical Dashboard Guidelines (Altair)
 
@@ -204,21 +208,21 @@ To prepare the BigQuery Political Ads and Meta Ad Library data for campaign inte
   - **Demographic Breakdown Dropdown:** Allows users to switch views between *Age Cohorts*, *Gender Segments*, and *Cross-Platform Delivery*.
   - **NC Regional Market Dropdown:** Allows users to switch views between *NC County Spend Heatmap*, *NC Media Markets (DMAs)*, *Competitor Spenders within Market*, and *PAC Market Share*.
   - **Pacing Granularity Dropdown:** Allows users to toggle between *Weekly Expenditure Pace* and *Cumulative Spend Trajectory*.
-  - **Target Demographic Selectors (Ad Content View):** Allows the client to select specific **Age Groups** and **Gender Segments** to inspect what creative ad types (Video, Image, Text) and messaging are shown to them.
+  - **Target Demographic Selectors (Video & Ad Content View):** Allows the client to select specific **Age Groups** and **Gender Segments** to inspect what creative ad types (Video, Image, Text) and messaging are shown to them using Meta API data.
 
 - **Campaign-Focused Analytical Views (North Carolina Focus):**
   - **Demographic Gap & Opportunity View (`audience_charts.py`):**
-    - Rank and highlight NC demographic groups (age brackets, gender) by lowest impression share and reach.
+    - Rank and highlight NC demographic groups (age brackets, gender) by lowest impression share and reach from 2024 to current.
     - Use visual alerts/conditional coloring (e.g., warning highlights on bottom cohorts) to clearly show under-served demographics requiring immediate campaign targeting.
   - **Regional Competitor Spend View & NC County Heatmap (`geo_charts.py`):**
-    - Render an interactive **North Carolina County Spend Heatmap** (choropleth / intensity matrix) displaying ad expenditure across NC counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe, Union, New Hanover, Gaston, Cabarrus) using a vivid heatmap color gradient (e.g., yellow-to-red or viridis) to reveal regional spending hotspots and under-targeted zones.
+    - Render an interactive **North Carolina County Spend Heatmap applied over an image of North Carolina and its counties** (e.g. choropleth overlay with county boundaries or heatmap overlay on NC county basemap) displaying ad expenditure across all NC counties (e.g., Mecklenburg, Wake, Guilford, Forsyth, Cumberland, Durham, Buncombe, Union, New Hanover, Gaston, Cabarrus) using a vivid heatmap color gradient (e.g., yellow-to-red or viridis) to showcase what regions are getting the most attention via spending.
     - Map and rank North Carolina DMAs/media markets (Charlotte, Raleigh-Durham, Greensboro-Winston-Salem, Greenville, Wilmington, Asheville) and counties by total competitor expenditure.
     - Provide stacked bar charts and market share breakdowns by rival candidates, PACs, and advertiser organizations to expose battleground saturation across North Carolina.
-  - **Targeted Ad Content & Creative Format View (`creative_charts.py`):**
-    - A dedicated dashboard section analyzing what types of ads (Video, Image, Text) are being served across North Carolina.
+  - **Targeted Video & Creative Ad Content View via Meta API (`creative_charts.py`):**
+    - A dedicated dashboard section for video data using the **Facebook / Meta Ad Library API** to see what types of ads (Video, Image, Text) are being shown to each age and gender demographic across North Carolina.
     - Empower the campaign client to select their target **Age Groups** (e.g. 18-24, 25-34, 35-44, 45-54, 55-64, ≥65) and **Gender** (Female, Male, All) via interactive drop-down menus.
-    - Dynamically display the format distribution (Video vs. Image vs. Text), comparing spend, impressions, and estimated CPM for the chosen demographic to reveal which creative formats apply best.
-    - Provide an inspectable creative sample gallery/table showing ad titles, Transparency Report URLs (`ad_url`), active flight duration, and sponsoring PACs so clients can inspect what content is actively deployed to their demographic of interest.
+    - Dynamically display the format distribution (Video vs. Image vs. Text), comparing spend, impressions, and demographic delivery percentages from Meta's `demographic_distribution` for the chosen demographic to determine what types of ads (specifically video vs. static creatives) apply best to each group.
+    - Provide an inspectable creative sample gallery/table showing ad titles, ad preview/snapshot URLs (`ad_snapshot_url`), format badges (Video, Image, Text), active flight duration, and sponsoring PACs so clients can inspect what content and video messaging are actively deployed to their demographic of interest.
 
 - **Strict Typing:** Always specify explicit Altair data types on encodings:
   - `:Q` Quantitative (spend, impressions)
