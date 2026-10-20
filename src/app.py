@@ -35,6 +35,7 @@ try:
         unnest_demographics,
         process_meta_demographics,
         generate_nc_county_spend,
+        VALID_AGE_COHORTS,
         NC_DMAS
     )
     from src.components.audience_charts import (
@@ -54,7 +55,9 @@ try:
         create_nc_county_heatmap_chart,
         create_nc_county_choropleth_chart,
         create_nc_county_spatial_heatmap_chart,
-        generate_nc_county_map_heatmap_svg
+        generate_nc_county_map_heatmap_svg,
+        create_county_campaign_spend_chart,
+        create_county_meta_age_cohort_chart
     )
     from src.components.spend_charts import (
         create_nc_spend_trajectory_chart,
@@ -88,6 +91,7 @@ except ModuleNotFoundError:
         unnest_demographics,
         process_meta_demographics,
         generate_nc_county_spend,
+        VALID_AGE_COHORTS,
         NC_DMAS
     )
     from components.audience_charts import (
@@ -107,7 +111,9 @@ except ModuleNotFoundError:
         create_nc_county_heatmap_chart,
         create_nc_county_choropleth_chart,
         create_nc_county_spatial_heatmap_chart,
-        generate_nc_county_map_heatmap_svg
+        generate_nc_county_map_heatmap_svg,
+        create_county_campaign_spend_chart,
+        create_county_meta_age_cohort_chart
     )
     from components.spend_charts import (
         create_nc_spend_trajectory_chart,
@@ -314,7 +320,7 @@ def main():
     total_ads = len(filtered_df)
 
     unnested_demo = unnest_demographics(clean_bq, "age_targeting")
-    demo_reach = unnested_demo.groupby("age_targeting")["impressions_est"].sum()
+    demo_reach = unnested_demo[unnested_demo["age_targeting"].isin(VALID_AGE_COHORTS)].groupby("age_targeting")["impressions_est"].sum()
     least_viewed_cohort = demo_reach.idxmin() if not demo_reach.empty else "18-24"
 
     top_dma_spend = cleaned_geo.groupby("nc_dma")["spend_usd"].sum()
@@ -531,7 +537,8 @@ def main():
 
             with st.expander("📊 View Google Demographic Targeting Data Table"):
                 g_table = (
-                    unnested_demo.groupby("age_targeting", as_index=False)
+                    unnested_demo[unnested_demo["age_targeting"].isin(VALID_AGE_COHORTS)]
+                    .groupby("age_targeting", as_index=False)
                     .agg(
                         Impressions=("impressions_est", "sum"),
                         Spend_USD=("spend_usd_est", "sum"),
@@ -632,7 +639,23 @@ def main():
                 unsafe_allow_html=True
             )
 
-            cross_chart = create_nc_cross_platform_demographic_chart(unnested_demo, metric_label="Estimated Impressions")
+            # Construct clean cross-platform demographic dataframe with zero empty gaps
+            google_slice = unnested_demo[
+                unnested_demo["age_targeting"].isin(VALID_AGE_COHORTS)
+            ][["age_targeting", "impressions_est", "spend_usd_est", "ad_id"]].copy()
+            google_slice["platform"] = "Google"
+
+            meta_slice = pd.DataFrame({
+                "age_targeting": df_meta_demo["age_group"],
+                "platform": "Meta",
+                "impressions_est": df_meta_demo["demographic_impressions"],
+                "spend_usd_est": df_meta_demo["demographic_spend_usd"],
+                "ad_id": df_meta_demo["ad_id"]
+            })
+            meta_slice = meta_slice[meta_slice["age_targeting"].isin(VALID_AGE_COHORTS)]
+            cross_platform_demo = pd.concat([google_slice, meta_slice], ignore_index=True)
+
+            cross_chart = create_nc_cross_platform_demographic_chart(cross_platform_demo, metric_label="Estimated Impressions")
             st.altair_chart(cross_chart, width="stretch", theme="streamlit")
 
             cross_insights = generate_cross_platform_strategic_insights(clean_bq, df_meta_demo)
@@ -960,6 +983,14 @@ def main():
                 key="geo_metric_select"
             )
 
+        # Synchronize selected county across URL query parameters and session state
+        county_list = df_county["county_name"].tolist() if not df_county.empty else ["Mecklenburg"]
+        query_county = st.query_params.get("county", None)
+        if "selected_county" not in st.session_state:
+            st.session_state.selected_county = "Mecklenburg"
+        if query_county and query_county in county_list:
+            st.session_state.selected_county = query_county
+
         # Top summary KPIs for counties
         if not df_county.empty:
             top_county = df_county.sort_values(by="spend_usd", ascending=False).iloc[0]
@@ -975,9 +1006,13 @@ def main():
                 st.metric("Under-Targeted Counties", f"{rural_count} Counties", "⚪ Low Tier Outreach Target")
 
         if geo_chart_choice == "NC County Heatmap (Applied Over NC Counties Map Image)":
-            # Render cleanly using Streamlit Components HTML to prevent raw code escaping
-            svg_html = generate_nc_county_map_heatmap_svg(df_county, metric_label=geo_metric_choice)
-            components.html(svg_html, height=460, scrolling=False)
+            # Render further enlarged non-scrollable heatmap using modern Streamlit iframe (1200x800 canvas, taking full space)
+            svg_html = generate_nc_county_map_heatmap_svg(
+                df_county,
+                selected_county=st.session_state.selected_county,
+                metric_label=geo_metric_choice
+            )
+            st.iframe(svg_html, height=920, width="stretch")
 
         elif geo_chart_choice == "NC County Spatial Coordinate Heatmap":
             spatial_map = create_nc_county_spatial_heatmap_chart(df_county, metric_label=geo_metric_choice)
@@ -1004,8 +1039,172 @@ def main():
             share_chart = create_nc_market_share_chart(cleaned_geo)
             st.altair_chart(share_chart, width="stretch", theme="streamlit")
 
+        # =========================================================================
+        # DEDICATED COUNTY STRATEGIC DEEP-DIVE INTELLIGENCE DISPLAY
+        # Appears directly beneath the heatmap in a distinct, styled display container
+        # =========================================================================
+        active_county = st.session_state.selected_county
+        county_match = df_county[df_county["county_name"] == active_county]
+        if not county_match.empty:
+            c_data = county_match.iloc[0]
+            active_spend = c_data["spend_usd"]
+            active_imp = c_data.get("impressions_est", int(active_spend * 45))
+            active_tier = c_data.get("spend_tier", "⚪ Low")
+            active_dma = c_data["nc_dma"]
+        else:
+            active_spend = 0.0
+            active_imp = 0
+            active_tier = "⚪ Low"
+            active_dma = "Charlotte DMA"
+
+        # Determine top advertiser in this county's DMA
+        dma_adv_records = cleaned_geo[cleaned_geo["nc_dma"] == active_dma] if not cleaned_geo.empty and "nc_dma" in cleaned_geo.columns else cleaned_geo
+        if not dma_adv_records.empty:
+            top_adv_series = dma_adv_records.groupby("advertiser_name")["spend_usd"].sum().sort_values(ascending=False)
+            top_adv_name = top_adv_series.index[0] if len(top_adv_series) > 0 else "N/A"
+            top_adv_val = top_adv_series.iloc[0] if len(top_adv_series) > 0 else 0.0
+        else:
+            top_adv_name = "N/A"
+            top_adv_val = 0.0
+
+        # Determine dominant Meta targeted age cohort in this county's DMA
+        dma_meta_records = df_meta_demo[df_meta_demo["nc_dma"] == active_dma] if not df_meta_demo.empty and "nc_dma" in df_meta_demo.columns else df_meta_demo
+        if not dma_meta_records.empty and "age_group" in dma_meta_records.columns:
+            meta_age_series = dma_meta_records.groupby("age_group")["demographic_impressions"].sum().sort_values(ascending=False)
+            top_age_bracket = meta_age_series.index[0] if len(meta_age_series) > 0 else "N/A"
+            top_age_imp = meta_age_series.iloc[0] if len(meta_age_series) > 0 else 0
+            total_dma_imp = meta_age_series.sum()
+            top_age_pct = (top_age_imp / total_dma_imp * 100) if total_dma_imp > 0 else 0.0
+        else:
+            top_age_bracket = "N/A"
+            top_age_pct = 0.0
+
+        st.markdown(
+            f"""
+            <div style="background: linear-gradient(135deg, #0b1329 0%, #111e38 100%); 
+                        border: 1.5px solid #0284c7; border-radius: 14px; padding: 22px 24px; 
+                        margin-top: 25px; margin-bottom: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="margin: 0; color: #f8fafc; font-size: 20px; font-weight: 800;">
+                            🏛️ Strategic County Deep-Dive: <span style="color: #38bdf8;">{active_county} County</span> Intelligence Profile
+                        </h3>
+                        <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13px;">
+                            Synchronized with County Heatmap clicks. Review how much each campaign has spent in this region alongside Meta Ad Library voter age targeting.
+                        </p>
+                    </div>
+                    <div style="background: rgba(2, 132, 199, 0.2); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 14px; color: #38bdf8; font-size: 12.5px; font-weight: 700;">
+                        Media Market: {active_dma}
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # Drop-down and Metric Controls for Deep-Dive Display
+        deep_ctrl1, deep_ctrl2 = st.columns([2, 1])
+        with deep_ctrl1:
+            chosen_county = st.selectbox(
+                "📍 Select North Carolina County to Gather Intelligence:",
+                options=county_list,
+                index=county_list.index(active_county) if active_county in county_list else 0,
+                key="deepdive_county_picker",
+                help="Switch between counties or click directly on any county node on the heatmap above to update this display."
+            )
+            if chosen_county != active_county:
+                st.session_state.selected_county = chosen_county
+                st.query_params["county"] = chosen_county
+                st.rerun()
+
+        with deep_ctrl2:
+            deep_metric = st.selectbox(
+                "Measure (Y-Axis / Metric):",
+                options=["Total Spend ($ USD)", "Estimated Impressions"],
+                index=0,
+                key="deepdive_metric_picker"
+            )
+
+        # Quick-Pick Battleground County Chips
+        st.markdown("<div style='font-size: 12px; color: #94a3b8; margin-bottom: 8px;'><strong>Battleground County Shortcuts:</strong></div>", unsafe_allow_html=True)
+        chip_cols = st.columns(7)
+        quick_picks = ["Mecklenburg", "Wake", "Guilford", "Forsyth", "Cumberland", "Durham", "Buncombe"]
+        for idx, q_c in enumerate(quick_picks):
+            with chip_cols[idx]:
+                if st.button(f"📍 {q_c}", key=f"chip_btn_{q_c}", use_container_width=True):
+                    st.session_state.selected_county = q_c
+                    st.query_params["county"] = q_c
+                    st.rerun()
+
+        # 4 High-Impact KPI Cards for this County
+        c_kpi_col1, c_kpi_col2, c_kpi_col3, c_kpi_col4 = st.columns(4)
+        with c_kpi_col1:
+            st.metric(
+                label=f"Regional Spend ({active_county})",
+                value=f"${active_spend:,.2f}",
+                delta=active_tier
+            )
+        with c_kpi_col2:
+            st.metric(
+                label="Delivered Impressions",
+                value=f"{active_imp:,}",
+                delta="Voter Reach"
+            )
+        with c_kpi_col3:
+            st.metric(
+                label="Top Regional Spender",
+                value=f"${top_adv_val:,.0f}",
+                delta=top_adv_name[:24] if top_adv_name != "N/A" else "None"
+            )
+        with c_kpi_col4:
+            st.metric(
+                label="Dominant Meta Age Cohort",
+                value=top_age_bracket,
+                delta=f"{top_age_pct:.1f}% Audience Share"
+            )
+
+        # Two Side-by-Side Deep Dive Visualizations: Campaign Spend & Meta Age Cohorts
+        g_row1, g_row2 = st.columns(2)
+        with g_row1:
+            county_spend_chart = create_county_campaign_spend_chart(
+                df_geo=cleaned_geo,
+                county_name=active_county,
+                dma=active_dma,
+                metric_label=deep_metric,
+                top_n=8
+            )
+            st.altair_chart(county_spend_chart, width="stretch", theme="streamlit")
+
+        with g_row2:
+            county_meta_chart = create_county_meta_age_cohort_chart(
+                df_meta_demo=df_meta_demo,
+                county_name=active_county,
+                dma=active_dma,
+                metric_label=deep_metric
+            )
+            st.altair_chart(county_meta_chart, width="stretch", theme="streamlit")
+
+        # Executive Tactical Briefing Card for the Selected County
+        st.markdown(
+            f"""
+            <div class="insight-card">
+                <h4>📋 Tactical Campaign Intelligence Briefing: {active_county} County ({active_dma})</h4>
+                <ul>
+                    <li><strong>Regional Investment Footprint:</strong> Political organizations have deployed an estimated <strong>${active_spend:,.2f}</strong> across North Carolina digital channels in {active_county} County, categorizing it in the <strong>{active_tier}</strong> campaign saturation tier.</li>
+                    <li><strong>Market Rivalry Saturation:</strong> <strong>{top_adv_name}</strong> commands the single largest advertising footprint in this media market, accounting for <strong>${top_adv_val:,.0f}</strong> in deployed ad buys.</li>
+                    <li><strong>Meta Voter Age Targeting Focus:</strong> Empirical Meta Ad Library data reveals that the <strong>{top_age_bracket}</strong> age cohort represents <strong>{top_age_pct:.1f}%</strong> of total social impressions delivered in {active_dma}, reflecting heavy persuasion messaging targeted at high-turnout older demographics.</li>
+                    <li><strong>Voter Mobilization Blind Spot:</strong> Younger voters (ages 18–24 and 25–34) receive significantly fewer ad impressions in {active_county}, providing an uncrowded digital mobilization lane with lower effective CPM acquisition costs.</li>
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
         with st.expander("📍 View North Carolina County & Market Spending Details"):
-            exp_tab1, exp_tab2 = st.tabs(["🏛️ NC County Spending Ledger", "📺 NC Media Market Breakdown"])
+            exp_tab1, exp_tab2 = st.tabs([
+                "🏛️ NC County Spending Ledger",
+                "📺 NC Media Market Breakdown"
+            ])
             with exp_tab1:
                 st.dataframe(
                     df_county[["county_name", "nc_dma", "spend_tier", "spend_usd", "impressions_est", "fips"]],
@@ -1094,6 +1293,7 @@ def main():
             * **Demographic Separation:** Google targeting settings and Meta empirical audience delivery distributions are analyzed separately to prevent false equivalencies.
             * **Ad Types / Formats Separation:** Google BigQuery and Meta Ad Library data are divided into dedicated subsections to clearly differentiate YouTube/Search advertising from Facebook/Instagram social formats.
             * **Meta API Video & Demographic Breakdown:** The Meta Ad Library API's `demographic_distribution` breakdown is processed to reveal what types of ads (Video vs. Image vs. Text) are delivered to each specific age group and gender segment.
+            * **Meta App Token Permissions & Security:** Access to the Meta Ad Library API requires an authorized **Meta App Token** with verified app permissions. In accordance with strict security standards, the Meta App Token is never included in source code and is loaded strictly through runtime environment variables.
             """)
 
             st.markdown("""

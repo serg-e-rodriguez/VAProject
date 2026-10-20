@@ -113,6 +113,7 @@ def create_google_format_distribution_chart(
 
     total_val = agg[col].sum()
     agg["share_pct"] = (agg[col] / total_val) * 100 if total_val > 0 else 0.0
+    max_val = agg[col].max() if not agg.empty else 1.0
 
     color_scale = alt.Scale(
         domain=["VIDEO", "IMAGE", "TEXT"],
@@ -123,8 +124,13 @@ def create_google_format_distribution_chart(
         alt.Chart(agg)
         .mark_bar(cornerRadiusEnd=6, size=35)
         .encode(
-            x=alt.X("ad_type:N", title="Google Ad Creative Format", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y(f"{col}:Q", title=cfg["title"], axis=alt.Axis(format=cfg["format"], grid=True)),
+            x=alt.X("ad_type:N", title="Google Ad Creative Format", axis=alt.Axis(labelAngle=0, labelPadding=6)),
+            y=alt.Y(
+                f"{col}:Q",
+                title=cfg["title"],
+                scale=alt.Scale(domainMax=max_val * 1.16),
+                axis=alt.Axis(format=cfg["format"], grid=True, titlePadding=10)
+            ),
             color=alt.Color("ad_type:N", scale=color_scale, legend=None),
             tooltip=[
                 alt.Tooltip("ad_type:N", title="Google Format"),
@@ -175,6 +181,7 @@ def create_google_format_cpm_chart(
     )
     agg = agg[agg["impressions_est"] > 0].copy()
     agg["cpm_est"] = (agg["spend_usd_est"] / agg["impressions_est"]) * 1000.0
+    max_cpm = agg["cpm_est"].max() if not agg.empty else 1.0
 
     color_scale = alt.Scale(
         domain=["VIDEO", "IMAGE", "TEXT"],
@@ -185,8 +192,13 @@ def create_google_format_cpm_chart(
         alt.Chart(agg)
         .mark_bar(cornerRadiusEnd=5, size=30)
         .encode(
-            x=alt.X("ad_type:N", title="Google Ad Creative Format", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("cpm_est:Q", title="Estimated CPM ($ / 1k Impressions)", axis=alt.Axis(format="$,.2f", grid=True)),
+            x=alt.X("ad_type:N", title="Google Ad Creative Format", axis=alt.Axis(labelAngle=0, labelPadding=6)),
+            y=alt.Y(
+                "cpm_est:Q",
+                title="Estimated CPM ($ / 1k Impressions)",
+                scale=alt.Scale(domainMax=max_cpm * 1.16),
+                axis=alt.Axis(format="$,.2f", grid=True, titlePadding=10)
+            ),
             color=alt.Color("ad_type:N", scale=color_scale, legend=None),
             tooltip=[
                 alt.Tooltip("ad_type:N", title="Format"),
@@ -209,7 +221,7 @@ def create_google_format_cpm_chart(
 
     text = (
         alt.Chart(agg)
-        .mark_text(align="center", dy=-8, color="#e2e8f0", fontSize=11)
+        .mark_text(align="center", dy=-8, color="#e2e8f0", fontSize=11, fontWeight="bold")
         .encode(
             x=alt.X("ad_type:N"),
             y=alt.Y("cpm_est:Q"),
@@ -323,6 +335,7 @@ def create_meta_demographic_format_chart(
 
     total_val = agg[col].sum()
     agg["share_pct"] = (agg[col] / total_val) * 100 if total_val > 0 else 0.0
+    max_val = agg[col].max() if not agg.empty else 1.0
 
     color_scale = alt.Scale(
         domain=["VIDEO", "IMAGE", "TEXT"],
@@ -333,8 +346,13 @@ def create_meta_demographic_format_chart(
         alt.Chart(agg)
         .mark_bar(cornerRadiusEnd=6, size=35)
         .encode(
-            x=alt.X("ad_type:N", title="Meta Ad Creative Format", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y(f"{col}:Q", title=cfg["title"], axis=alt.Axis(format=cfg["format"], grid=True)),
+            x=alt.X("ad_type:N", title="Meta Ad Creative Format", axis=alt.Axis(labelAngle=0, labelPadding=6)),
+            y=alt.Y(
+                f"{col}:Q",
+                title=cfg["title"],
+                scale=alt.Scale(domainMax=max_val * 1.16),
+                axis=alt.Axis(format=cfg["format"], grid=True, titlePadding=10)
+            ),
             color=alt.Color("ad_type:N", scale=color_scale, legend=None),
             tooltip=[
                 alt.Tooltip("ad_type:N", title="Meta Format"),
@@ -385,6 +403,7 @@ def create_meta_format_cpm_chart(
     )
     agg = agg[agg["demographic_impressions"] > 0].copy()
     agg["cpm_est"] = (agg["demographic_spend_usd"] / agg["demographic_impressions"]) * 1000.0
+    max_cpm = agg["cpm_est"].max() if not agg.empty else 1.0
 
     color_scale = alt.Scale(
         domain=["VIDEO", "IMAGE", "TEXT"],
@@ -395,8 +414,13 @@ def create_meta_format_cpm_chart(
         alt.Chart(agg)
         .mark_bar(cornerRadiusEnd=5, size=30)
         .encode(
-            x=alt.X("ad_type:N", title="Meta Ad Creative Format", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("cpm_est:Q", title="Delivered CPM ($ / 1k Impressions)", axis=alt.Axis(format="$,.2f", grid=True)),
+            x=alt.X("ad_type:N", title="Meta Ad Creative Format", axis=alt.Axis(labelAngle=0, labelPadding=6)),
+            y=alt.Y(
+                "cpm_est:Q",
+                title="Delivered CPM ($ / 1k Impressions)",
+                scale=alt.Scale(domainMax=max_cpm * 1.16),
+                axis=alt.Axis(format="$,.2f", grid=True, titlePadding=10)
+            ),
             color=alt.Color("ad_type:N", scale=color_scale, legend=None),
             tooltip=[
                 alt.Tooltip("ad_type:N", title="Format"),
@@ -419,7 +443,7 @@ def create_meta_format_cpm_chart(
 
     text = (
         alt.Chart(agg)
-        .mark_text(align="center", dy=-8, color="#e2e8f0", fontSize=11)
+        .mark_text(align="center", dy=-8, color="#e2e8f0", fontSize=11, fontWeight="bold")
         .encode(
             x=alt.X("ad_type:N"),
             y=alt.Y("cpm_est:Q"),
@@ -436,11 +460,15 @@ def create_video_adoption_by_demographic_chart(df_meta_processed: pd.DataFrame) 
     leveraging Facebook / Meta Ad Library API demographic distribution data.
     Directly reveals which age cohorts receive the highest proportion of video advertising.
     """
-    if df_meta_processed.empty or "age_group" not in df_meta_processed.columns:
+    VALID_AGE_COHORTS = ["18-24", "25-34", "35-44", "45-54", "55-64", "≥65"]
+    clean_meta = df_meta_processed[
+        df_meta_processed["age_group"].astype(str).str.strip().isin(VALID_AGE_COHORTS)
+    ].copy()
+    if clean_meta.empty:
         return alt.Chart(pd.DataFrame()).mark_text()
 
     agg = (
-        df_meta_processed.groupby(["age_group", "ad_type"], as_index=False)["demographic_impressions"]
+        clean_meta.groupby(["age_group", "ad_type"], as_index=False)["demographic_impressions"]
         .sum()
     )
 
@@ -456,9 +484,9 @@ def create_video_adoption_by_demographic_chart(df_meta_processed: pd.DataFrame) 
         alt.Chart(agg)
         .mark_bar(cornerRadiusEnd=3)
         .encode(
-            x=alt.X("format_share_pct:Q", stack="normalize", title="Format Impression Share (%)", axis=alt.Axis(format="%")),
-            y=alt.Y("age_group:N", sort=["18-24", "25-34", "35-44", "45-54", "55-64", "≥65"], title="NC Voter Age Cohort"),
-            color=alt.Color("ad_type:N", scale=color_scale, legend=alt.Legend(title="Ad Format (Meta API)", orient="bottom")),
+            x=alt.X("format_share_pct:Q", stack="normalize", title="Format Impression Share (%)", axis=alt.Axis(format="%", titlePadding=10)),
+            y=alt.Y("age_group:N", sort=VALID_AGE_COHORTS, title="NC Voter Age Cohort", axis=alt.Axis(labelPadding=6, titlePadding=10)),
+            color=alt.Color("ad_type:N", scale=color_scale, legend=alt.Legend(title="Ad Format (Meta API)", orient="bottom", titlePadding=8)),
             tooltip=[
                 alt.Tooltip("age_group:N", title="Age Cohort"),
                 alt.Tooltip("ad_type:N", title="Format"),
@@ -483,12 +511,16 @@ def create_video_adoption_by_demographic_chart(df_meta_processed: pd.DataFrame) 
 def create_gender_video_breakdown_chart(df_meta_processed: pd.DataFrame) -> alt.Chart:
     """
     Visualizes ad format breakdown delivered to Female vs. Male voters in NC using Meta API data.
+    Uses grouped bar offset (`xOffset='ad_type:N'`) so formats are cleanly aligned side-by-side
+    without overlapping or column facet collisions.
     """
     if df_meta_processed.empty or "gender" not in df_meta_processed.columns:
         return alt.Chart(pd.DataFrame()).mark_text()
 
-    clean_gender_df = df_meta_processed[df_meta_processed["gender"].isin(["female", "male"])].copy()
-    clean_gender_df["gender_label"] = clean_gender_df["gender"].str.capitalize()
+    clean_gender_df = df_meta_processed[
+        df_meta_processed["gender"].astype(str).str.lower().isin(["female", "male"])
+    ].copy()
+    clean_gender_df["gender_label"] = clean_gender_df["gender"].astype(str).str.capitalize()
 
     agg = (
         clean_gender_df.groupby(["gender_label", "ad_type"], as_index=False)["demographic_impressions"]
@@ -505,12 +537,12 @@ def create_gender_video_breakdown_chart(df_meta_processed: pd.DataFrame) -> alt.
 
     chart = (
         alt.Chart(agg)
-        .mark_bar(cornerRadiusEnd=4, size=30)
+        .mark_bar(cornerRadiusEnd=4, size=24)
         .encode(
-            x=alt.X("ad_type:N", title="Ad Creative Format", axis=alt.Axis(labelAngle=0)),
-            y=alt.Y("share_pct:Q", title="Delivery Share (%)", axis=alt.Axis(format=".0f", grid=True)),
-            color=alt.Color("ad_type:N", scale=color_scale, legend=None),
-            column=alt.Column("gender_label:N", title="NC Voter Gender Segment"),
+            x=alt.X("gender_label:N", title="NC Voter Gender Segment", axis=alt.Axis(labelAngle=0, labelPadding=6, titlePadding=10)),
+            xOffset="ad_type:N",
+            y=alt.Y("share_pct:Q", title="Delivery Share (%)", scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(format=".0f", grid=True, titlePadding=10)),
+            color=alt.Color("ad_type:N", scale=color_scale, legend=alt.Legend(title="Ad Format (Meta API)", orient="bottom", titlePadding=8)),
             tooltip=[
                 alt.Tooltip("gender_label:N", title="Gender"),
                 alt.Tooltip("ad_type:N", title="Format"),
@@ -521,15 +553,16 @@ def create_gender_video_breakdown_chart(df_meta_processed: pd.DataFrame) -> alt.
         .properties(
             title=alt.TitleParams(
                 text="Meta Ad Format Distribution by Gender (Meta API)",
-                subtitle="Evaluates whether Video or Static Images achieve higher delivered penetration across genders",
+                subtitle="Video vs. Static Image penetration compared side-by-side between Female and Male voters",
                 fontSize=14,
                 subtitleFontSize=11,
                 subtitleColor="#94a3b8"
             ),
-            height=280
+            height=320
         )
     )
     return chart
+
 
 
 def generate_meta_creative_insights(df_meta_demo: pd.DataFrame) -> list[str]:

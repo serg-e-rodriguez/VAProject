@@ -17,6 +17,7 @@ def create_nc_spend_trajectory_chart(
     """
     Visualizes NC political advertising spend trajectory over time.
     Supports switching between weekly velocity and cumulative trajectory.
+    Configured with clean bottom legend and axis padding to prevent clipping or collisions.
     """
     if df_weekly.empty or "week_start_date" not in df_weekly.columns:
         return alt.Chart(pd.DataFrame({"msg": ["No NC pacing data available"]})).mark_text().encode(text="msg:N")
@@ -36,26 +37,29 @@ def create_nc_spend_trajectory_chart(
         title_text = "Weekly Political Ad Spend Velocity in North Carolina"
         y_title = "Weekly Spend ($ USD)"
 
+    max_metric = agg["spend_metric"].max() if not agg.empty else 1.0
+
     brush = alt.selection_interval(encodings=["x"])
 
     chart = (
         alt.Chart(agg)
-        .mark_line(point=alt.OverlayMarkDef(filled=True, size=25), strokeWidth=2.5)
+        .mark_line(point=alt.OverlayMarkDef(filled=True, size=28), strokeWidth=2.5)
         .encode(
             x=alt.X(
                 "week_start_date:T",
                 title="Campaign Week",
-                axis=alt.Axis(format="%b %d, %Y", grid=True)
+                axis=alt.Axis(format="%b %d, %Y", grid=True, titlePadding=10, labelPadding=6)
             ),
             y=alt.Y(
                 "spend_metric:Q",
                 title=y_title,
-                axis=alt.Axis(format="$,~s", grid=True)
+                scale=alt.Scale(domainMax=max_metric * 1.12),
+                axis=alt.Axis(format="$,~s", grid=True, titlePadding=12)
             ),
             color=alt.Color(
                 "advertiser_name:N",
                 scale=alt.Scale(scheme="tableau10"),
-                legend=alt.Legend(title="Competitor PAC / Campaign", orient="top", columns=2)
+                legend=alt.Legend(title="Competitor PAC / Campaign", orient="bottom", columns=2, titlePadding=8)
             ),
             tooltip=[
                 alt.Tooltip("week_start_date:T", title="Week Of", format="%B %d, %Y"),
@@ -72,7 +76,7 @@ def create_nc_spend_trajectory_chart(
                 subtitleFontSize=12,
                 subtitleColor="#94a3b8"
             ),
-            height=320
+            height=340
         )
         .interactive()
     )
@@ -80,7 +84,7 @@ def create_nc_spend_trajectory_chart(
 
 
 def create_nc_format_efficiency_chart(df_creatives: pd.DataFrame) -> alt.Chart:
-    """Analyzes creative ad formats (VIDEO, IMAGE, TEXT) in North Carolina."""
+    """Analyzes creative ad formats (VIDEO, IMAGE, TEXT) in North Carolina with domain headroom."""
     if df_creatives.empty or "ad_type" not in df_creatives.columns:
         return alt.Chart(pd.DataFrame()).mark_text()
 
@@ -94,11 +98,19 @@ def create_nc_format_efficiency_chart(df_creatives: pd.DataFrame) -> alt.Chart:
     )
 
     agg["cpm_est"] = (agg["spend_usd_est"] / agg["impressions_est"]) * 1000
+    max_spend = agg["spend_usd_est"].max() if not agg.empty else 1.0
 
-    base = alt.Chart(agg).encode(x=alt.X("ad_type:N", title="Ad Creative Format"))
+    base = alt.Chart(agg).encode(
+        x=alt.X("ad_type:N", title="Ad Creative Format", axis=alt.Axis(labelAngle=0, labelPadding=6))
+    )
 
-    bar = base.mark_bar(cornerRadiusEnd=5, color="#10b981", size=30).encode(
-        y=alt.Y("spend_usd_est:Q", title="Total NC Spend ($ USD)", axis=alt.Axis(format="$,~s")),
+    bar = base.mark_bar(cornerRadiusEnd=5, color="#10b981", size=32).encode(
+        y=alt.Y(
+            "spend_usd_est:Q",
+            title="Total NC Spend ($ USD)",
+            scale=alt.Scale(domainMax=max_spend * 1.16),
+            axis=alt.Axis(format="$,~s", titlePadding=10)
+        ),
         tooltip=[
             alt.Tooltip("ad_type:N", title="Format"),
             alt.Tooltip("spend_usd_est:Q", title="NC Spend", format="$,.2f"),
@@ -108,7 +120,12 @@ def create_nc_format_efficiency_chart(df_creatives: pd.DataFrame) -> alt.Chart:
         ]
     )
 
-    return bar.properties(
+    text = base.mark_text(align="center", dy=-8, color="#cbd5e1", fontSize=11, fontWeight="bold").encode(
+        y=alt.Y("spend_usd_est:Q"),
+        text=alt.Text("spend_usd_est:Q", format="$,~s")
+    )
+
+    return (bar + text).properties(
         title=alt.TitleParams(
             text="Ad Format Performance & Expenditure in NC",
             subtitle="Allocation of capital across Video, Image, and Text ad creatives targeting NC",
@@ -116,12 +133,15 @@ def create_nc_format_efficiency_chart(df_creatives: pd.DataFrame) -> alt.Chart:
             subtitleFontSize=11,
             subtitleColor="#94a3b8"
         ),
-        height=280
+        height=300
     )
 
 
 def create_nc_platform_comparison_chart(df_combined: pd.DataFrame) -> alt.Chart:
-    """Compares Google Political Ads vs. Meta Ad Library metrics in North Carolina."""
+    """
+    Compares Google Political Ads vs. Meta Ad Library metrics in North Carolina.
+    Provides domain headroom and value annotations to prevent text clipping or mark collision.
+    """
     if df_combined.empty or "platform" not in df_combined.columns:
         return alt.Chart(pd.DataFrame()).mark_text()
 
@@ -134,12 +154,19 @@ def create_nc_platform_comparison_chart(df_combined: pd.DataFrame) -> alt.Chart:
         )
     )
 
-    chart = (
+    max_spend = agg["spend_usd_est"].max() if not agg.empty else 1.0
+
+    bar = (
         alt.Chart(agg)
-        .mark_bar(cornerRadiusEnd=6, size=40)
+        .mark_bar(cornerRadiusEnd=6, size=44)
         .encode(
-            x=alt.X("platform:N", title="Advertising Platform"),
-            y=alt.Y("spend_usd_est:Q", title="Total Spend in NC ($ USD)", axis=alt.Axis(format="$,~s")),
+            x=alt.X("platform:N", title="Advertising Platform", axis=alt.Axis(labelAngle=0, labelPadding=6)),
+            y=alt.Y(
+                "spend_usd_est:Q",
+                title="Total Spend in NC ($ USD)",
+                scale=alt.Scale(domainMax=max_spend * 1.16),
+                axis=alt.Axis(format="$,~s", titlePadding=10)
+            ),
             color=alt.Color(
                 "platform:N",
                 scale=alt.Scale(domain=["Google", "Meta"], range=["#4285F4", "#0668E1"]),
@@ -152,22 +179,36 @@ def create_nc_platform_comparison_chart(df_combined: pd.DataFrame) -> alt.Chart:
                 alt.Tooltip("ad_count:Q", title="Total Creatives", format=",")
             ]
         )
-        .properties(
-            title=alt.TitleParams(
-                text="Platform Budget Allocation in NC: Google vs. Meta",
-                subtitle="Comparison of ad dollars distributed across search/YouTube vs. Facebook/Instagram in NC",
-                fontSize=14,
-                subtitleFontSize=11,
-                subtitleColor="#94a3b8"
-            ),
-            height=280
+    )
+
+    text = (
+        alt.Chart(agg)
+        .mark_text(align="center", dy=-8, color="#cbd5e1", fontSize=12, fontWeight="bold")
+        .encode(
+            x=alt.X("platform:N"),
+            y=alt.Y("spend_usd_est:Q"),
+            text=alt.Text("spend_usd_est:Q", format="$,~s")
         )
     )
-    return chart
+
+    return (bar + text).properties(
+        title=alt.TitleParams(
+            text="Platform Budget Allocation in NC: Google vs. Meta",
+            subtitle="Comparison of ad dollars distributed across search/YouTube vs. Facebook/Instagram in NC",
+            fontSize=14,
+            subtitleFontSize=11,
+            subtitleColor="#94a3b8"
+        ),
+        height=300
+    )
 
 
 def create_top_spenders_overview_chart(df: pd.DataFrame, top_n: int = 8) -> alt.Chart:
-    """Ranks the top political spenders in North Carolina across platforms."""
+    """
+    Ranks the top political spenders in North Carolina across platforms.
+    Uses grouped bar offset (`yOffset='platform:N'`) so Google and Meta bars are cleanly aligned
+    side-by-side without overlapping or colliding.
+    """
     if df.empty or "advertiser_name" not in df.columns:
         return alt.Chart(pd.DataFrame()).mark_text()
 
@@ -185,17 +226,29 @@ def create_top_spenders_overview_chart(df: pd.DataFrame, top_n: int = 8) -> alt.
     )
 
     agg = agg[agg["advertiser_name"].isin(top_names)].copy()
+    max_spend = agg["spend_usd_est"].max() if not agg.empty else 1.0
 
     chart = (
         alt.Chart(agg)
-        .mark_bar(cornerRadiusEnd=4, size=18)
+        .mark_bar(cornerRadiusEnd=4, size=14)
         .encode(
-            y=alt.Y("advertiser_name:N", sort="-x", title="PAC / Campaign Organization"),
-            x=alt.X("spend_usd_est:Q", title="Total Estimated Spend ($ USD)", axis=alt.Axis(format="$,~s")),
+            y=alt.Y(
+                "advertiser_name:N",
+                sort="-x",
+                title="PAC / Campaign Organization",
+                axis=alt.Axis(labelPadding=6, titlePadding=10)
+            ),
+            yOffset="platform:N",
+            x=alt.X(
+                "spend_usd_est:Q",
+                title="Total Estimated Spend ($ USD)",
+                scale=alt.Scale(domainMax=max_spend * 1.15),
+                axis=alt.Axis(format="$,~s", titlePadding=10)
+            ),
             color=alt.Color(
                 "platform:N",
                 scale=alt.Scale(domain=["Google", "Meta"], range=["#4285F4", "#0668E1"]),
-                legend=alt.Legend(title="Platform", orient="bottom")
+                legend=alt.Legend(title="Platform", orient="bottom", titlePadding=8)
             ),
             tooltip=[
                 alt.Tooltip("advertiser_name:N", title="Spender"),
@@ -206,13 +259,14 @@ def create_top_spenders_overview_chart(df: pd.DataFrame, top_n: int = 8) -> alt.
         .properties(
             title=alt.TitleParams(
                 text=f"Top {top_n} Political Advertisers in North Carolina (2024–Current)",
-                subtitle="Identifies the highest-spending campaigns and PACs across Google and Meta",
+                subtitle="Google and Meta investments aligned side-by-side to compare digital allocation without overlap",
                 fontSize=14,
                 subtitleFontSize=11,
                 subtitleColor="#94a3b8"
             ),
-            height=300
+            height=340
         )
     )
     return chart
+
 

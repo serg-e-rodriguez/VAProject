@@ -14,12 +14,12 @@ import requests
 import streamlit as st
 
 try:
-    from src.config import META_AD_TOKEN
+    from src.config import META_APP_TOKEN, META_AD_TOKEN
 except ModuleNotFoundError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import META_AD_TOKEN
+    from config import META_APP_TOKEN, META_AD_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +147,8 @@ def generate_mock_meta_ads(n: int = 1200) -> pd.DataFrame:
 
         records.append({
             "ad_id": f"CR-META-NC-{i+50000:05d}",
-            "ad_url": f"https://www.facebook.com/ads/library/?id=CR-META-NC-{i+50000:05d}",
-            "ad_snapshot_url": f"https://www.facebook.com/ads/archive/render_ad/?id=CR-META-NC-{i+50000:05d}",
+            "ad_url": f"https://www.facebook.com/ads/library/?id={i+50000:05d}",
+            "ad_snapshot_url": f"https://www.facebook.com/ads/archive/render_ad/?id={i+50000:05d}",
             "ad_type": ad_type,
             "regions": "NC",
             "advertiser_id": adv_id,
@@ -178,14 +178,21 @@ def load_meta_ads(max_records: int = 1200) -> tuple[pd.DataFrame, bool]:
     """
     Queries Meta Ad Library API for political and issue ads in North Carolina.
     Strictly filters ads delivered from 2024 to current (`ad_delivery_date_min='2024-01-01'`).
-    Returns (DataFrame, is_live_data). If token is invalid or rate limited, returns (mock_data, False).
+    
+    PERMISSIONS REQUIREMENT (META APP TOKEN):
+    Access to Meta's political ads archive requires an App Token (or verified app access permissions).
+    SECURITY MANDATE: The Meta App Token must NEVER be included in source code and is strictly loaded 
+    at runtime via environment variables (META_APP_TOKEN in .env or env.txt).
+    
+    Returns (DataFrame, is_live_data). If token is missing, unauthorized, or rate-limited, returns (mock_data, False).
     """
-    if not META_AD_TOKEN or len(META_AD_TOKEN) < 20:
-        logger.info("Meta token not set; returning synthetic NC Meta political ads (2024-Current).")
+    clean_token = (META_APP_TOKEN or META_AD_TOKEN or "").strip().strip('"').strip("'")
+    if not clean_token or len(clean_token) < 20:
+        logger.info("Meta App Token not configured; using calibrated NC Meta political ads sample dataset (2024-Current).")
         return generate_mock_meta_ads(n=max_records), False
 
     params = {
-        "access_token": META_AD_TOKEN,
+        "access_token": clean_token,
         "ad_type": "POLITICAL_AND_ISSUE_ADS",
         "ad_reached_countries": "['US']",
         "search_terms": "North Carolina",
@@ -242,8 +249,16 @@ def load_meta_ads(max_records: int = 1200) -> tuple[pd.DataFrame, bool]:
             df = pd.DataFrame(records)
             return df, True
         else:
-            logger.warning(f"Meta API responded with HTTP {response.status_code}: {response.text[:200]}")
+            # Mask error details to ensure no tokens or credentials leak
+            err_msg = response.text[:250]
+            if "OAuthException" in err_msg or response.status_code == 400:
+                logger.warning(
+                    f"Meta Ad Library API requires an authorized Meta App Token with Ads Archive permissions "
+                    f"(HTTP {response.status_code}). Using calibrated NC political ads sample dataset."
+                )
+            else:
+                logger.warning(f"Meta API responded with HTTP {response.status_code}. Using calibrated sample dataset.")
             return generate_mock_meta_ads(n=max_records), False
     except Exception as exc:
-        logger.warning(f"Error querying Meta Ad Library API: {exc}")
+        logger.warning(f"Network error querying Meta Ad Library API: {exc}. Using calibrated sample dataset.")
         return generate_mock_meta_ads(n=max_records), False

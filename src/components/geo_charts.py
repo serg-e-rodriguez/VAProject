@@ -60,6 +60,7 @@ def create_nc_dma_ranking_chart(
             .sort_values(by=col, ascending=False)
         )
 
+    max_val = agg[col].max() if not agg.empty else 1.0
     hover = alt.selection_point(on="mouseover", empty=True)
 
     chart = (
@@ -69,12 +70,14 @@ def create_nc_dma_ranking_chart(
             x=alt.X(
                 f"{col}:Q",
                 title=f"NC Market: {cfg['title']}",
-                axis=alt.Axis(format=cfg["format"], grid=True)
+                scale=alt.Scale(domainMax=max_val * 1.18 if max_val > 0 else 100),
+                axis=alt.Axis(format=cfg["format"], grid=True, titlePadding=10, labelPadding=6)
             ),
             y=alt.Y(
                 "nc_dma:N",
                 sort="-x",
-                title="NC Media Market (DMA)"
+                title="NC Media Market (DMA)",
+                axis=alt.Axis(labelPadding=6, titlePadding=10)
             ),
             opacity=alt.condition(hover, alt.value(1.0), alt.value(0.75)),
             tooltip=[
@@ -97,7 +100,7 @@ def create_nc_dma_ranking_chart(
 
     text = (
         alt.Chart(agg)
-        .mark_text(align="left", dx=6, color="#e2e8f0", fontSize=11)
+        .mark_text(align="left", dx=6, color="#e2e8f0", fontSize=11, fontWeight="bold")
         .encode(
             x=alt.X(f"{col}:Q"),
             y=alt.Y("nc_dma:N", sort="-x"),
@@ -127,12 +130,21 @@ def create_nc_advertiser_breakdown_chart(
         alt.Chart(df_geo)
         .mark_bar(cornerRadiusEnd=3)
         .encode(
-            x=alt.X(f"{col}:Q", title=cfg["title"], axis=alt.Axis(format=cfg["format"])),
-            y=alt.Y("nc_dma:N", sort="-x", title="NC Media Market (DMA)"),
+            x=alt.X(
+                f"{col}:Q",
+                title=cfg["title"],
+                axis=alt.Axis(format=cfg["format"], titlePadding=10, labelPadding=6)
+            ),
+            y=alt.Y(
+                "nc_dma:N",
+                sort="-x",
+                title="NC Media Market (DMA)",
+                axis=alt.Axis(labelPadding=6, titlePadding=10)
+            ),
             color=alt.Color(
                 "advertiser_name:N",
                 scale=alt.Scale(scheme="category10"),
-                legend=alt.Legend(title="Competitor / PAC", orient="bottom", columns=2)
+                legend=alt.Legend(title="Competitor / PAC", orient="bottom", columns=2, titlePadding=8)
             ),
             opacity=alt.condition(select_adv, alt.value(1.0), alt.value(0.2)),
             tooltip=[
@@ -203,6 +215,7 @@ def create_nc_county_heatmap_chart(
     cfg = METRIC_CONFIG.get(metric_label, METRIC_CONFIG["Total Spend ($ USD)"])
     col = cfg["col"] if cfg["col"] in df_county.columns else "spend_usd"
 
+    max_spend = df_county[col].max() if not df_county.empty else 1.0
     hover = alt.selection_point(on="mouseover", empty=True)
 
     chart = (
@@ -212,12 +225,14 @@ def create_nc_county_heatmap_chart(
             x=alt.X(
                 f"{col}:Q",
                 title=f"NC County: {cfg['title']}",
-                axis=alt.Axis(format=cfg["format"], grid=True)
+                scale=alt.Scale(domainMax=max_spend * 1.18 if max_spend > 0 else 100),
+                axis=alt.Axis(format=cfg["format"], grid=True, titlePadding=10, labelPadding=6)
             ),
             y=alt.Y(
                 "county_name:N",
                 sort="-x",
-                title="North Carolina County"
+                title="North Carolina County",
+                axis=alt.Axis(labelPadding=6, titlePadding=10)
             ),
             color=alt.Color(
                 f"{col}:Q",
@@ -226,7 +241,8 @@ def create_nc_county_heatmap_chart(
                     title=f"Heatmap Intensity ({metric_label})",
                     orient="bottom",
                     format=cfg["format"],
-                    gradientLength=280
+                    gradientLength=280,
+                    titlePadding=8
                 )
             ),
             opacity=alt.condition(hover, alt.value(1.0), alt.value(0.8)),
@@ -252,7 +268,7 @@ def create_nc_county_heatmap_chart(
 
     text = (
         alt.Chart(df_county)
-        .mark_text(align="left", dx=6, color="#f8fafc", fontSize=10)
+        .mark_text(align="left", dx=6, color="#f8fafc", fontSize=10, fontWeight="bold")
         .encode(
             x=alt.X(f"{col}:Q"),
             y=alt.Y("county_name:N", sort="-x"),
@@ -261,6 +277,7 @@ def create_nc_county_heatmap_chart(
     )
 
     return chart + text
+
 
 
 def create_nc_county_choropleth_chart(
@@ -420,72 +437,150 @@ def create_nc_county_spatial_heatmap_chart(
 
 def generate_nc_county_map_heatmap_svg(
     df_county: pd.DataFrame,
+    selected_county: str = "Mecklenburg",
     metric_label: str = "Total Spend ($ USD)"
 ) -> str:
     """
-    Generates a rich, interactive SVG image of North Carolina and its counties
-    with a continuous heatmap overlay applied over the image to showcase which regions
-    and counties are receiving the most attention and funding from political spenders.
+    Renders an enlarged, interactive North Carolina Regional Spending Heatmap:
+    - Expanded 1200x800 canvas (2.0x base scale) providing ample breathing room for points and labels.
+    - Overlays radiant heatmap blooms and county spending nodes directly on top of `nc.jpg`.
+    - Point placements strictly calibrated to match real county locations from `nccountynames.jpg`.
+    - Interactive county click handler: clicking any county updates HUD and synchronizes with Streamlit deep-dive display.
+    - Prominently highlights the currently selected county with a pulsating selection ring.
+    - Completely non-scrollable and expands to use up the full available container space without scrolling.
+    - Note: nccountynames.jpg is used exclusively for spatial context during development and is NOT displayed in the UI.
     """
     if df_county.empty:
         return "<div style='color:#94a3b8; text-align:center;'>No county spend data available.</div>"
+
+    import base64
+    from pathlib import Path
+
+    # Resolve path for nc.jpg
+    p_nc = Path("nc.jpg")
+    if not p_nc.exists():
+        p_nc = Path("nc.JPEG")
+    if not p_nc.exists():
+        found = list(Path(".").glob("**/nc.jpg"))
+        if found:
+            p_nc = found[0]
+
+    nc_b64 = base64.b64encode(p_nc.read_bytes()).decode("utf-8") if p_nc.exists() else ""
 
     max_spend = df_county["spend_usd"].max() if not df_county.empty else 1.0
     if max_spend <= 0:
         max_spend = 1.0
 
-    # Build SVG heat blooms and county markers
+    # Directional label offsets calibrated for 1200x800 canvas (2.0x scale) to guarantee labels NEVER collide
+    LABEL_CONFIGS = {
+        "Mecklenburg": ("end", -18, 4),
+        "Gaston": ("end", -18, 22),
+        "Cabarrus": ("start", 18, -10),
+        "Union": ("start", 18, 20),
+        "Forsyth": ("end", -18, -14),
+        "Guilford": ("middle", 0, -26),
+        "Alamance": ("start", 16, -16),
+        "Orange": ("end", -16, 20),
+        "Durham": ("end", -18, -12),
+        "Wake": ("start", 20, 0),
+        "Johnston": ("start", 18, 22),
+        "Harnett": ("end", -18, 20),
+        "Cumberland": ("middle", 0, 30),
+        "Buncombe": ("middle", 0, -26),
+        "Henderson": ("end", -18, 20),
+        "New Hanover": ("start", 18, -8),
+        "Brunswick": ("middle", 0, 30),
+        "Pitt": ("start", 18, -10),
+        "Craven": ("start", 18, 20),
+        "Onslow": ("start", 18, 0),
+        "Wayne": ("middle", 0, 26),
+        "Rowan": ("end", -18, -10),
+        "Catawba": ("end", -18, -10),
+        "Iredell": ("middle", 0, -24),
+        "Davidson": ("end", -18, 16),
+    }
+
     heat_blooms_svg = []
     county_markers_svg = []
 
-    # Sort so smaller circles render on top of bigger ones
+    # Sort so smaller circles render on top of larger ones
     sorted_df = df_county.sort_values(by="spend_usd", ascending=True)
 
-    for i, row in sorted_df.iterrows():
+    for _, row in sorted_df.iterrows():
         c_name = row["county_name"]
         spend = row["spend_usd"]
         dma = row["nc_dma"]
-        ratio = min(max(spend / max_spend, 0.05), 1.0)
-        
-        # Calculate pixel coordinates in 900x420 viewport
-        px = int(row.get("x", 50) * 8.4) + 30
-        py = int(row.get("y", 50) * 3.4) + 40
+        tier = row.get("spend_tier", "⚪ Low")
+        impressions = row.get("impressions_est", int(spend * 45))
+        ratio = min(max(spend / max_spend, 0.04), 1.0)
+        is_selected = (c_name.strip().lower() == selected_county.strip().lower())
 
-        # Heat color calculation
+        # Scale calibrated coordinates by 2.0 to match expanded 1200x800 canvas
+        px = int(row.get("x", 300) * 2.0)
+        py = int(row.get("y", 200) * 2.0)
+
+        # Radiant bloom calculation based on spending intensity
         if ratio >= 0.70:
-            color = "#ef4444"  # Intense red
-            bloom_r = int(45 + ratio * 45)
-            bloom_op = 0.55
+            color = "#ef4444"  # Red (Epicenter saturation)
+            bloom_r = int(60 + ratio * 50)
+            bloom_op = 0.65
         elif ratio >= 0.35:
-            color = "#f97316"  # Vibrant orange
-            bloom_r = int(32 + ratio * 35)
-            bloom_op = 0.42
+            color = "#f97316"  # Orange (High spending)
+            bloom_r = int(45 + ratio * 40)
+            bloom_op = 0.52
         elif ratio >= 0.15:
-            color = "#eab308"  # Yellow
-            bloom_r = int(22 + ratio * 25)
-            bloom_op = 0.32
+            color = "#eab308"  # Yellow (Moderate)
+            bloom_r = int(32 + ratio * 28)
+            bloom_op = 0.42
         else:
-            color = "#38bdf8"  # Cool sky blue / low
-            bloom_r = 15
-            bloom_op = 0.18
+            color = "#38bdf8"  # Cyan / Light blue (Low)
+            bloom_r = 24
+            bloom_op = 0.30
 
-        node_r = int(6 + ratio * 14)
+        # Highly distinguishable node circle
+        node_r = int(9 + ratio * 18)
 
-        # Heat bloom element (creates smooth radiant blur overlay)
+        # Radiant heat bloom
         heat_blooms_svg.append(
             f'<circle cx="{px}" cy="{py}" r="{bloom_r}" fill="{color}" opacity="{bloom_op}" filter="url(#heat-blur)" />'
         )
 
-        # Core county node with hover title
-        is_top = ratio >= 0.35
+        # Directional non-overlapping label with high-contrast dark halo outline
+        is_top = ratio >= 0.10 or tier in ["🔥 Very High", "🟡 High", "🟢 Moderate"] or is_selected
         label_svg = ""
         if is_top:
-            label_svg = f'<text x="{px}" y="{py - node_r - 4}" fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" style="text-shadow: 0 1px 4px rgba(0,0,0,0.9);">{c_name} (${spend/1e3:,.0f}k)</text>'
+            anchor, dx, dy = LABEL_CONFIGS.get(c_name, ("middle", 0, -node_r - 8))
+            lx = px + dx
+            ly = py + dy
+            active_star = "★ " if is_selected else ""
+            label_color = "#38bdf8" if is_selected else "#ffffff"
+            label_svg = (
+                f'<text x="{lx}" y="{ly}" fill="{label_color}" font-size="13" '
+                f'font-weight="700" text-anchor="{anchor}" '
+                f'paint-order="stroke fill" stroke="#070d18" stroke-width="5" stroke-linejoin="round" '
+                f'filter="url(#text-shadow)">'
+                f'{active_star}{c_name} <tspan font-weight="500" fill="#cbd5e1">(${spend/1e3:,.0f}k)</tspan></text>'
+            )
+
+        # Active pulsating ring if selected
+        active_ring_svg = ""
+        if is_selected:
+            active_ring_svg = (
+                f'<circle cx="{px}" cy="{py}" r="{node_r + 9}" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="6,4">'
+                f'<animate attributeName="r" values="{node_r + 7};{node_r + 14};{node_r + 7}" dur="2.4s" repeatCount="indefinite" />'
+                f'<animate attributeName="opacity" values="1;0.4;1" dur="2.4s" repeatCount="indefinite" />'
+                f'</circle>'
+            )
+
+        active_class = "active-node" if is_selected else ""
+        node_stroke = "#38bdf8" if is_selected else "#ffffff"
+        node_stroke_w = "3.5" if is_selected else "2.2"
 
         county_markers_svg.append(f"""
-        <g class="county-node" style="cursor:pointer;">
-            <circle cx="{px}" cy="{py}" r="{node_r}" fill="{color}" stroke="#ffffff" stroke-width="1.8" opacity="0.95">
-                <title>{c_name} County ({dma})&#10;Spend: ${spend:,.2f}&#10;Impressions: {row['impressions_est']:,}</title>
+        <g class="county-node {active_class}" data-name="{c_name}" data-dma="{dma}" data-spend="${spend:,.2f}" data-imp="{impressions:,}" data-tier="{tier}" onclick="handleCountyClick('{c_name}')">
+            {active_ring_svg}
+            <circle cx="{px}" cy="{py}" r="{node_r}" fill="{color}" stroke="{node_stroke}" stroke-width="{node_stroke_w}" opacity="0.96">
+                <title>{c_name} County ({dma})&#10;Spend: ${spend:,.2f}&#10;Impressions: {impressions:,}&#10;Tier: {tier}&#10;Click to gather detailed intelligence below</title>
             </circle>
             {label_svg}
         </g>
@@ -499,93 +594,418 @@ def generate_nc_county_map_heatmap_svg(
 <head>
 <meta charset="utf-8">
 <style>
-body {{
+* {{
+    box-sizing: border-box;
+}}
+html, body {{
     margin: 0;
     padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden; /* Fully non-scrollable */
     background: transparent;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color: #f8fafc;
 }}
 .map-card {{
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 16px 20px;
     background: linear-gradient(145deg, #0b1120 0%, #0f172a 100%);
     border: 1px solid #334155;
-    border-radius: 12px;
-    padding: 18px 20px;
-    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);
+    border-radius: 14px;
+    box-shadow: 0 12px 30px -5px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    overflow: hidden; /* Zero scrollbars */
+}}
+.card-header {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}}
+.map-viewport {{
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}}
+svg {{
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    display: block;
+    border-radius: 10px;
+    background: #070d18;
+}}
+.county-node {{
+    cursor: pointer;
+    transition: transform 0.15s ease;
 }}
 .county-node:hover circle {{
     stroke: #38bdf8 !important;
-    stroke-width: 3px !important;
+    stroke-width: 4px !important;
     opacity: 1 !important;
+}}
+.active-node circle {{
+    stroke: #38bdf8 !important;
+    stroke-width: 4px !important;
+}}
+.tooltip-hud {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid #334155;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #e2e8f0;
+    margin-top: 8px;
+    flex-shrink: 0;
+}}
+.hud-btn {{
+    background: #0284c7;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: 8px;
+}}
+.hud-btn:hover {{
+    background: #38bdf8;
 }}
 </style>
 </head>
 <body>
 <div class="map-card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; flex-wrap:wrap;">
+    <div class="card-header">
         <div>
-            <h4 style="margin:0; color:#f8fafc; font-size:16px; font-weight:700;">🗺️ North Carolina County Political Ad Spend Heatmap</h4>
-            <p style="margin:4px 0 0 0; color:#94a3b8; font-size:12px;">Visualizing regional saturation and competitor funding epicenters overlaid on the geographic map of North Carolina counties</p>
+            <h4 style="margin:0; color:#f8fafc; font-size:18px; font-weight:700;">🗺️ North Carolina Regional Competitor Spend Heatmap (Enlarged Canvas)</h4>
+            <p style="margin:3px 0 0 0; color:#94a3b8; font-size:12.5px;">
+                Overlaying ad spend onto North Carolina (<strong>nc.jpg</strong>) • <strong>Click any county node</strong> to inspect competitor spend and Meta age targeting below
+            </p>
         </div>
-        <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 8px; padding: 5px 12px; font-size: 11px; color: #38bdf8; font-weight:600;">
-            North Carolina Battleground Counties (2024–Current)
+        <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 14px; font-size: 12.5px; color: #38bdf8; font-weight:600;">
+            Active Selection: <strong>{selected_county} County</strong>
         </div>
     </div>
 
-    <svg viewBox="0 0 880 380" width="100%" height="auto" style="border-radius: 8px; background: #070d18; display:block;">
-        <defs>
-            <filter id="heat-blur" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="15" />
-            </filter>
-            <linearGradient id="legend-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#38bdf8" />
-                <stop offset="25%" stop-color="#22c55e" />
-                <stop offset="55%" stop-color="#eab308" />
-                <stop offset="80%" stop-color="#f97316" />
-                <stop offset="100%" stop-color="#ef4444" />
-            </linearGradient>
-        </defs>
+    <!-- Non-Scrollable Responsive Heatmap Viewport (1200x800 Canvas) -->
+    <div class="map-viewport">
+        <svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid meet">
+            <defs>
+                <filter id="heat-blur" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="22" />
+                </filter>
+                <filter id="text-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="1.5" stdDeviation="3" flood-color="#000000" flood-opacity="0.95"/>
+                </filter>
+                <linearGradient id="legend-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="#38bdf8" />
+                    <stop offset="30%" stop-color="#22c55e" />
+                    <stop offset="60%" stop-color="#eab308" />
+                    <stop offset="85%" stop-color="#f97316" />
+                    <stop offset="100%" stop-color="#ef4444" />
+                </linearGradient>
+            </defs>
 
-        <!-- North Carolina Map Silhouette & County Region Footprint -->
-        <path d="M 55,220 L 120,200 L 160,190 L 210,180 L 260,160 L 340,145 L 410,130 L 490,125 L 610,125 L 730,130 L 775,170 L 825,185 L 800,235 L 740,285 L 685,315 L 640,295 L 590,260 L 530,260 L 480,255 L 410,265 L 370,285 L 330,270 L 280,265 L 220,255 L 165,260 L 110,265 Z" 
-              fill="#10192b" stroke="#334155" stroke-width="2" opacity="0.95" />
+            <!-- Base Map Image Layer (nc.jpg scaled to 1200x800 canvas) -->
+            <image href="data:image/jpeg;base64,{nc_b64}" x="0" y="0" width="1200" height="800" 
+                   preserveAspectRatio="none" 
+                   style="filter: invert(0.88) hue-rotate(185deg) contrast(1.15); opacity: 0.88;" />
 
-        <!-- County Guideline Grid -->
-        <path d="M 260,160 L 280,265 M 340,145 L 370,285 M 410,130 L 410,265 M 490,125 L 530,260 M 610,125 L 590,260 M 730,130 L 685,315" 
-              stroke="#1e293b" stroke-width="1.2" stroke-dasharray="4,4" />
+            <!-- Continuous Radiant Heatmap Layer -->
+            <g id="heat-blooms-layer">
+                {blooms_str}
+            </g>
 
-        <!-- Geographic Region Labels -->
-        <text x="110" y="165" fill="#475569" font-size="11" font-weight="600" letter-spacing="1">WESTERN MOUNTAINS</text>
-        <text x="325" y="120" fill="#475569" font-size="11" font-weight="600" letter-spacing="1">PIEDMONT / CHARLOTTE</text>
-        <text x="555" y="110" fill="#475569" font-size="11" font-weight="600" letter-spacing="1">TRIANGLE (RDU)</text>
-        <text x="700" y="155" fill="#475569" font-size="11" font-weight="600" letter-spacing="1">COASTAL PLAIN</text>
+            <!-- County Nodes & High-Contrast Directional Labels Layer -->
+            <g id="county-nodes-layer">
+                {nodes_str}
+            </g>
 
-        <!-- Continuous Radiant Heatmap Layer -->
-        {blooms_str}
+            <!-- Integrated Heatmap Intensity Legend -->
+            <g transform="translate(30, 750)">
+                <text x="0" y="14" fill="#94a3b8" font-size="12" font-weight="700">HEATMAP INTENSITY:</text>
+                <rect x="155" y="2" width="260" height="14" rx="7" fill="url(#legend-gradient)" />
+                <text x="155" y="30" fill="#64748b" font-size="11">Low (<$150k)</text>
+                <text x="285" y="30" fill="#64748b" font-size="11" text-anchor="middle">Moderate</text>
+                <text x="415" y="30" fill="#ef4444" font-size="11" font-weight="700" text-anchor="end">🔥 Saturation (>$1M)</text>
 
-        <!-- County Nodes & Labels Layer -->
-        {nodes_str}
+                <circle cx="485" cy="9" r="6" fill="#ef4444" stroke="#ffffff" stroke-width="1.8" />
+                <text x="500" y="14" fill="#e2e8f0" font-size="12">Charlotte (Mecklenburg) & Raleigh (Wake)</text>
 
-        <!-- Heatmap Intensity Legend -->
-        <g transform="translate(30, 340)">
-            <text x="0" y="14" fill="#94a3b8" font-size="11" font-weight="600">HEAT INTENSITY:</text>
-            <rect x="120" y="4" width="240" height="12" rx="6" fill="url(#legend-gradient)" />
-            <text x="120" y="27" fill="#64748b" font-size="10">Low Spend (<$150k)</text>
-            <text x="230" y="27" fill="#64748b" font-size="10" text-anchor="middle">Moderate ($150k-$400k)</text>
-            <text x="360" y="27" fill="#ef4444" font-size="10" font-weight="700" text-anchor="end">🔥 Saturation (>$1M)</text>
+                <circle cx="770" cy="9" r="6" fill="#f97316" stroke="#ffffff" stroke-width="1.8" />
+                <text x="785" y="14" fill="#e2e8f0" font-size="12">Piedmont Triad Epicenter</text>
+            </g>
+        </svg>
+    </div>
 
-            <circle cx="530" cy="10" r="5" fill="#ef4444" />
-            <text x="542" y="14" fill="#e2e8f0" font-size="11">Mecklenburg & Wake Epicenters</text>
-
-            <circle cx="720" cy="10" r="5" fill="#eab308" />
-            <text x="732" y="14" fill="#e2e8f0" font-size="11">Triad & Coastal Saturation</text>
-        </g>
-    </svg>
+    <!-- Active Hover & Click Detail Bar -->
+    <div class="tooltip-hud" id="tooltip-hud">
+        <div>
+            <span style="color:#94a3b8;">Selected County: </span>
+            <span id="hud-name" style="font-weight:700; color:#38bdf8;">{selected_county} County</span>
+            <span style="color:#64748b; margin: 0 8px;">•</span>
+            <span id="hud-dma" style="color:#cbd5e1;">Designated Market Area</span>
+        </div>
+        <div>
+            <span style="color:#94a3b8;">Estimated Spend: </span>
+            <span id="hud-spend" style="font-weight:700; color:#22c55e;">$0.00</span>
+            <span style="color:#64748b; margin: 0 8px;">•</span>
+            <span id="hud-tier" style="color:#f59e0b;">Spending Tier</span>
+            <span style="color:#64748b; margin: 0 8px;">•</span>
+            <span style="color:#38bdf8; font-size:12px;">👆 Click to update deep-dive display below</span>
+        </div>
+    </div>
 </div>
+
+<script>
+// Interactive hover and click handler for county nodes
+function updateHUD(name, dma, spend, tier) {{
+    document.getElementById('hud-name').textContent = name + ' County';
+    if (dma) document.getElementById('hud-dma').textContent = dma;
+    if (spend) document.getElementById('hud-spend').textContent = spend;
+    if (tier) document.getElementById('hud-tier').textContent = tier;
+}}
+
+function handleCountyClick(countyName) {{
+    updateHUD(countyName);
+    try {{
+        const parentUrl = new URL(window.parent.location.href);
+        parentUrl.searchParams.set("county", countyName);
+        window.parent.location.href = parentUrl.toString();
+    }} catch (e) {{
+        console.log("Could not update parent window:", e);
+    }}
+}}
+
+document.querySelectorAll('.county-node').forEach(node => {{
+    node.addEventListener('mouseenter', () => {{
+        const name = node.getAttribute('data-name');
+        const dma = node.getAttribute('data-dma');
+        const spend = node.getAttribute('data-spend');
+        const tier = node.getAttribute('data-tier');
+        updateHUD(name, dma, spend, tier);
+    }});
+}});
+</script>
 </body>
 </html>
 """
     return html_content
+
+
+def create_county_campaign_spend_chart(
+    df_geo: pd.DataFrame,
+    county_name: str,
+    dma: str,
+    metric_label: str = "Total Spend ($ USD)",
+    top_n: int = 8
+) -> alt.Chart:
+    """
+    Renders a bar chart showing how much each competitor campaign and PAC
+    has spent in the selected county's media market region.
+    Guarantees scale headroom padding (max_val * 1.22) so data labels never clip.
+    """
+    cfg = METRIC_CONFIG.get(metric_label, METRIC_CONFIG["Total Spend ($ USD)"])
+    col = cfg["col"] if cfg["col"] in df_geo.columns else "spend_usd"
+
+    # Filter to this county's DMA if available
+    if not df_geo.empty and "nc_dma" in df_geo.columns:
+        filtered = df_geo[df_geo["nc_dma"] == dma]
+        if filtered.empty:
+            filtered = df_geo
+    else:
+        filtered = df_geo
+
+    if filtered.empty or "advertiser_name" not in filtered.columns:
+        return alt.Chart(pd.DataFrame({"msg": [f"No regional spending records for {county_name} County ({dma})"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+
+    agg = (
+        filtered.groupby("advertiser_name", as_index=False)[col]
+        .sum()
+        .sort_values(by=col, ascending=False)
+        .head(top_n)
+    )
+
+    if agg.empty:
+        return alt.Chart(pd.DataFrame({"msg": [f"No campaign spending data for {county_name}"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+
+    max_val = agg[col].max() if not agg.empty else 1.0
+    hover = alt.selection_point(on="mouseover", empty=True)
+
+    chart = (
+        alt.Chart(agg)
+        .mark_bar(cornerRadiusEnd=5, color="#38bdf8", size=20)
+        .encode(
+            x=alt.X(
+                f"{col}:Q",
+                title=f"Regional Investment: {cfg['title']}",
+                scale=alt.Scale(domainMax=max_val * 1.22 if max_val > 0 else 100),
+                axis=alt.Axis(format=cfg["format"], grid=True, titlePadding=10, labelPadding=6)
+            ),
+            y=alt.Y(
+                "advertiser_name:N",
+                sort="-x",
+                title="Competitor Campaign / PAC",
+                axis=alt.Axis(labelLimit=220, labelPadding=6, titlePadding=10)
+            ),
+            opacity=alt.condition(hover, alt.value(1.0), alt.value(0.78)),
+            tooltip=[
+                alt.Tooltip("advertiser_name:N", title="Campaign / PAC"),
+                alt.Tooltip(f"{col}:Q", title=metric_label, format=cfg["tooltip_format"])
+            ]
+        )
+        .add_params(hover)
+        .properties(
+            title=alt.TitleParams(
+                text=f"Campaign & PAC Spending in {county_name} Region ({dma})",
+                subtitle=f"Rival organizations ranked by ad investment in this media market ({metric_label})",
+                fontSize=14,
+                subtitleFontSize=11,
+                subtitleColor="#94a3b8"
+            ),
+            height=280
+        )
+    )
+
+    text = (
+        alt.Chart(agg)
+        .mark_text(align="left", dx=6, color="#f8fafc", fontSize=10.5, fontWeight="bold")
+        .encode(
+            x=alt.X(f"{col}:Q"),
+            y=alt.Y("advertiser_name:N", sort="-x"),
+            text=alt.Text(f"{col}:Q", format=cfg["format"])
+        )
+    )
+
+    return chart + text
+
+
+def create_county_meta_age_cohort_chart(
+    df_meta_demo: pd.DataFrame,
+    county_name: str,
+    dma: str,
+    metric_label: str = "Estimated Impressions"
+) -> alt.Chart:
+    """
+    Renders an Altair chart analyzing audience delivery by age cohort and gender
+    from the Meta Ad Library API for the selected county's media market.
+    Strictly filters against canonical VALID_AGE_COHORTS with ZERO empty gaps.
+    Configures scale headroom padding to avoid text clipping.
+    """
+    if df_meta_demo.empty:
+        return alt.Chart(pd.DataFrame({"msg": [f"No Meta demographic data available for {county_name}"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+
+    # Filter to this county's DMA if present, otherwise use calibrated state distribution
+    filtered = df_meta_demo
+    if "nc_dma" in df_meta_demo.columns:
+        match_dma = df_meta_demo[df_meta_demo["nc_dma"] == dma]
+        if not match_dma.empty:
+            filtered = match_dma
+
+    # Determine metric column
+    if "Spend" in metric_label or "spend" in metric_label.lower():
+        metric_col = "demographic_spend_usd" if "demographic_spend_usd" in filtered.columns else "spend_usd_est"
+        fmt = "$,~s"
+        t_fmt = "$,.2f"
+        y_title = "Meta Ad Spend ($ USD)"
+    else:
+        metric_col = "demographic_impressions" if "demographic_impressions" in filtered.columns else "impressions_est"
+        fmt = "~s"
+        t_fmt = ","
+        y_title = "Delivered Ad Impressions"
+
+    valid_cohorts = ["18-24", "25-34", "35-44", "45-54", "55-64", "≥65"]
+
+    # Filter strictly to canonical cohorts and non-empty gender (zero empty gaps)
+    clean_demo = filtered[
+        filtered["age_group"].isin(valid_cohorts) &
+        filtered["gender"].isin(["Female", "Male"]) &
+        filtered[metric_col].notna() &
+        (filtered[metric_col] > 0)
+    ].copy()
+
+    if clean_demo.empty:
+        return alt.Chart(pd.DataFrame({"msg": [f"No demographic delivery records for {county_name} ({dma})"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+
+    agg = (
+        clean_demo.groupby(["age_group", "gender"], as_index=False)[metric_col]
+        .sum()
+    )
+
+    max_val = agg[metric_col].max() if not agg.empty else 1.0
+    hover = alt.selection_point(on="mouseover", empty=True)
+
+    chart = (
+        alt.Chart(agg)
+        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+        .encode(
+            x=alt.X(
+                "age_group:N",
+                sort=valid_cohorts,
+                title="Voter Age Cohort (Meta Ad Library)",
+                axis=alt.Axis(labelAngle=0, labelPadding=6, titlePadding=10)
+            ),
+            xOffset="gender:N",
+            y=alt.Y(
+                f"{metric_col}:Q",
+                title=y_title,
+                scale=alt.Scale(domainMax=max_val * 1.20 if max_val > 0 else 100),
+                axis=alt.Axis(format=fmt, grid=True, titlePadding=10, labelPadding=6)
+            ),
+            color=alt.Color(
+                "gender:N",
+                scale=alt.Scale(
+                    domain=["Female", "Male"],
+                    range=["#ec4899", "#3b82f6"]
+                ),
+                legend=alt.Legend(title="Gender", orient="top", columns=2, titlePadding=6)
+            ),
+            opacity=alt.condition(hover, alt.value(1.0), alt.value(0.78)),
+            tooltip=[
+                alt.Tooltip("age_group:N", title="Age Cohort"),
+                alt.Tooltip("gender:N", title="Gender"),
+                alt.Tooltip(f"{metric_col}:Q", title=y_title, format=t_fmt)
+            ]
+        )
+        .add_params(hover)
+        .properties(
+            title=alt.TitleParams(
+                text=f"Meta Ad Library Targeted Age Cohorts: {county_name} ({dma})",
+                subtitle="Empirical ad delivery across voter age groups and gender demographics (Meta API)",
+                fontSize=14,
+                subtitleFontSize=11,
+                subtitleColor="#94a3b8"
+            ),
+            height=280
+        )
+    )
+
+    text = (
+        alt.Chart(agg)
+        .mark_text(align="center", baseline="bottom", dy=-5, color="#f8fafc", fontSize=9.5, fontWeight="bold")
+        .encode(
+            x=alt.X("age_group:N", sort=valid_cohorts),
+            xOffset="gender:N",
+            y=alt.Y(f"{metric_col}:Q"),
+            text=alt.Text(f"{metric_col}:Q", format=fmt)
+        )
+    )
+
+    return chart + text
 
 
 # Alias for backward compatibility

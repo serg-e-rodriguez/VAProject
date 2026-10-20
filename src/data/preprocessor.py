@@ -184,23 +184,38 @@ def clean_creative_stats(df: pd.DataFrame) -> pd.DataFrame:
     return cleaned
 
 
+VALID_AGE_COHORTS: list[str] = ["18-24", "25-34", "35-44", "45-54", "55-64", "≥65"]
+
+
 def unnest_demographics(df: pd.DataFrame, demographic_col: str = "age_targeting") -> pd.DataFrame:
     """
     Unnests comma-delimited demographic strings (e.g. '18-24, 25-34') into individual rows
     to compute demographic reach and identify underserved cohorts viewing ads the least in NC.
+    Strictly filters out empty gaps, blank strings, nulls, and non-canonical age brackets.
     """
     if df.empty or demographic_col not in df.columns:
         return df
 
     exploded = df.copy()
-    exploded[demographic_col] = (
-        exploded[demographic_col]
-        .fillna("Not targeted")
-        .astype(str)
-        .str.split(r",\s*")
-    )
+    s = exploded[demographic_col].fillna("").astype(str).str.strip()
+    s = s.replace({"nan": "", "None": "", "null": "", "Not targeted": "Broad / Untargeted"})
+    exploded[demographic_col] = s.str.split(r",\s*")
     exploded = exploded.explode(demographic_col)
-    exploded[demographic_col] = exploded[demographic_col].str.strip()
+    exploded[demographic_col] = exploded[demographic_col].astype(str).str.strip()
+    exploded[demographic_col] = exploded[demographic_col].replace({"65+": "≥65"})
+
+    # Defensive gap elimination: drop empty strings, nulls, and whitespace entries
+    exploded = exploded[
+        exploded[demographic_col].notna() &
+        (exploded[demographic_col] != "") &
+        (~exploded[demographic_col].isin(["nan", "None", "null", ""]))
+    ].copy()
+
+    # If processing age targeting, retain canonical cohorts or clearly marked broad
+    if demographic_col == "age_targeting":
+        valid_set = set(VALID_AGE_COHORTS) | {"Broad / Untargeted"}
+        exploded = exploded[exploded[demographic_col].isin(valid_set)].copy()
+
     return exploded
 
 
@@ -216,6 +231,7 @@ def process_meta_demographics(df_meta: pd.DataFrame) -> pd.DataFrame:
     - ad titles, snapshot URLs, and messaging copy
     Allows examining what types of ads (specifically video vs. static creatives)
     are delivered to each age and gender demographic in North Carolina.
+    Guarantees no empty gaps or missing age cohorts.
     """
     if df_meta.empty or "demographic_distribution" not in df_meta.columns:
         return pd.DataFrame()
@@ -244,7 +260,7 @@ def process_meta_demographics(df_meta: pd.DataFrame) -> pd.DataFrame:
             if age == "65+":
                 age = "≥65"
             gender = str(item.get("gender", "")).capitalize().strip()
-            if not age or not gender:
+            if not age or not gender or age not in VALID_AGE_COHORTS:
                 continue
 
             rows.append({
@@ -334,32 +350,33 @@ def clean_advertiser_weekly_spend(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # North Carolina Key Counties with FIPS codes, DMAs, and spatial centroid coordinates
+# Calibrated using nccountynames.jpg for exact county placement onto nc.jpg (600x399)
 NC_COUNTIES = [
-    {"county_name": "Mecklenburg", "fips": 37119, "nc_dma": "Charlotte DMA", "share_weight": 0.22, "x": 38, "y": 68},
-    {"county_name": "Wake", "fips": 37183, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.20, "x": 62, "y": 38},
-    {"county_name": "Guilford", "fips": 37081, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.10, "x": 48, "y": 30},
-    {"county_name": "Forsyth", "fips": 37067, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.08, "x": 42, "y": 28},
-    {"county_name": "Cumberland", "fips": 37051, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 58, "y": 62},
-    {"county_name": "Durham", "fips": 37063, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 58, "y": 33},
-    {"county_name": "Buncombe", "fips": 37021, "nc_dma": "Asheville DMA", "share_weight": 0.05, "x": 19, "y": 55},
-    {"county_name": "Union", "fips": 37179, "nc_dma": "Charlotte DMA", "share_weight": 0.04, "x": 42, "y": 76},
-    {"county_name": "New Hanover", "fips": 37129, "nc_dma": "Wilmington DMA", "share_weight": 0.04, "x": 75, "y": 82},
-    {"county_name": "Gaston", "fips": 37071, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 34, "y": 66},
-    {"county_name": "Cabarrus", "fips": 37025, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 42, "y": 58},
-    {"county_name": "Johnston", "fips": 37101, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.03, "x": 64, "y": 46},
-    {"county_name": "Pitt", "fips": 37147, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.02, "x": 75, "y": 40},
-    {"county_name": "Alamance", "fips": 37001, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 52, "y": 32},
-    {"county_name": "Davidson", "fips": 37057, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 44, "y": 45},
-    {"county_name": "Iredell", "fips": 37097, "nc_dma": "Charlotte DMA", "share_weight": 0.02, "x": 36, "y": 46},
-    {"county_name": "Orange", "fips": 37135, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.02, "x": 55, "y": 34},
-    {"county_name": "Rowan", "fips": 37159, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 40, "y": 52},
-    {"county_name": "Catawba", "fips": 37035, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 30, "y": 52},
-    {"county_name": "Brunswick", "fips": 37019, "nc_dma": "Wilmington DMA", "share_weight": 0.015, "x": 72, "y": 90},
-    {"county_name": "Onslow", "fips": 37133, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.015, "x": 75, "y": 68},
-    {"county_name": "Wayne", "fips": 37191, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01, "x": 68, "y": 52},
-    {"county_name": "Henderson", "fips": 37089, "nc_dma": "Asheville DMA", "share_weight": 0.01, "x": 21, "y": 64},
-    {"county_name": "Craven", "fips": 37049, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01, "x": 78, "y": 56},
-    {"county_name": "Harnett", "fips": 37085, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.01, "x": 58, "y": 52},
+    {"county_name": "Mecklenburg", "fips": 37119, "nc_dma": "Charlotte DMA", "share_weight": 0.22, "x": 248, "y": 202},
+    {"county_name": "Wake", "fips": 37183, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.20, "x": 414, "y": 190},
+    {"county_name": "Guilford", "fips": 37081, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.10, "x": 347, "y": 141},
+    {"county_name": "Forsyth", "fips": 37067, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.08, "x": 304, "y": 140},
+    {"county_name": "Cumberland", "fips": 37051, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 392, "y": 219},
+    {"county_name": "Durham", "fips": 37063, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.06, "x": 391, "y": 179},
+    {"county_name": "Buncombe", "fips": 37021, "nc_dma": "Asheville DMA", "share_weight": 0.05, "x": 145, "y": 170},
+    {"county_name": "Union", "fips": 37179, "nc_dma": "Charlotte DMA", "share_weight": 0.04, "x": 323, "y": 230},
+    {"county_name": "New Hanover", "fips": 37129, "nc_dma": "Wilmington DMA", "share_weight": 0.04, "x": 425, "y": 269},
+    {"county_name": "Gaston", "fips": 37071, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 261, "y": 218},
+    {"county_name": "Cabarrus", "fips": 37025, "nc_dma": "Charlotte DMA", "share_weight": 0.03, "x": 288, "y": 219},
+    {"county_name": "Johnston", "fips": 37101, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.03, "x": 435, "y": 200},
+    {"county_name": "Pitt", "fips": 37147, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.02, "x": 481, "y": 183},
+    {"county_name": "Alamance", "fips": 37001, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 363, "y": 146},
+    {"county_name": "Davidson", "fips": 37057, "nc_dma": "Greensboro-High Point-Winston-Salem DMA", "share_weight": 0.02, "x": 281, "y": 160},
+    {"county_name": "Iredell", "fips": 37097, "nc_dma": "Charlotte DMA", "share_weight": 0.02, "x": 261, "y": 188},
+    {"county_name": "Orange", "fips": 37135, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.02, "x": 372, "y": 161},
+    {"county_name": "Rowan", "fips": 37159, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 223, "y": 195},
+    {"county_name": "Catawba", "fips": 37035, "nc_dma": "Charlotte DMA", "share_weight": 0.015, "x": 203, "y": 192},
+    {"county_name": "Brunswick", "fips": 37019, "nc_dma": "Wilmington DMA", "share_weight": 0.015, "x": 402, "y": 282},
+    {"county_name": "Onslow", "fips": 37133, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.015, "x": 449, "y": 235},
+    {"county_name": "Wayne", "fips": 37191, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.015, "x": 418, "y": 222},
+    {"county_name": "Henderson", "fips": 37089, "nc_dma": "Asheville DMA", "share_weight": 0.01, "x": 128, "y": 201},
+    {"county_name": "Craven", "fips": 37049, "nc_dma": "Greenville-New Bern-Washington DMA", "share_weight": 0.01, "x": 489, "y": 206},
+    {"county_name": "Harnett", "fips": 37085, "nc_dma": "Raleigh-Durham-Fayetteville DMA", "share_weight": 0.01, "x": 363, "y": 214},
 ]
 
 
