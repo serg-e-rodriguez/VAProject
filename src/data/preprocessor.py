@@ -219,6 +219,28 @@ def unnest_demographics(df: pd.DataFrame, demographic_col: str = "age_targeting"
     return exploded
 
 
+def check_gender_data_exists(df: pd.DataFrame, gender_col: str = "gender_targeting") -> bool:
+    """
+    Checks whether valid, actionable gender data exists in the given DataFrame.
+    Returns True ONLY if:
+    1. The DataFrame is non-empty and gender_col is present in df.columns.
+    2. The column contains non-null, non-empty values.
+    3. The column contains actual gender categories (e.g. 'Female', 'Male')
+       and is NOT exclusively 'Not targeted', 'Broad / Untargeted', 'Unknown', 'None', 'nan', or empty.
+    """
+    if df is None or df.empty or gender_col not in df.columns:
+        return False
+
+    s = df[gender_col].dropna().astype(str).str.strip()
+    s = s[~s.str.lower().isin(["", "nan", "none", "null", "not targeted", "broad / untargeted", "unknown", "untargeted", "all", "all genders"])]
+    if s.empty:
+        return False
+
+    has_female = s.str.contains("female", case=False).any()
+    has_male = s.str.contains(r"\bmale\b", case=False).any()
+    return bool(has_female or has_male)
+
+
 def process_meta_demographics(df_meta: pd.DataFrame) -> pd.DataFrame:
     """
     Unnests Meta Ad Library API `demographic_distribution` objects into structured rows:

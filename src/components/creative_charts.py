@@ -10,6 +10,15 @@ from __future__ import annotations
 import altair as alt
 import pandas as pd
 
+try:
+    from src.data.preprocessor import check_gender_data_exists
+except ModuleNotFoundError:
+    try:
+        from data.preprocessor import check_gender_data_exists
+    except ModuleNotFoundError:
+        def check_gender_data_exists(df: pd.DataFrame, col: str) -> bool:
+            return False
+
 
 METRIC_CONFIG = {
     "Estimated Spend ($ USD)": {
@@ -508,14 +517,15 @@ def create_video_adoption_by_demographic_chart(df_meta_processed: pd.DataFrame) 
     return chart
 
 
-def create_gender_video_breakdown_chart(df_meta_processed: pd.DataFrame) -> alt.Chart:
+def create_gender_video_breakdown_chart(df_meta_processed: pd.DataFrame) -> alt.Chart | None:
     """
     Visualizes ad format breakdown delivered to Female vs. Male voters in NC using Meta API data.
     Uses grouped bar offset (`xOffset='ad_type:N'`) so formats are cleanly aligned side-by-side
     without overlapping or column facet collisions.
+    Returns None if gender data does not exist in the dataset.
     """
-    if df_meta_processed.empty or "gender" not in df_meta_processed.columns:
-        return alt.Chart(pd.DataFrame()).mark_text()
+    if not check_gender_data_exists(df_meta_processed, "gender"):
+        return None
 
     clean_gender_df = df_meta_processed[
         df_meta_processed["gender"].astype(str).str.lower().isin(["female", "male"])

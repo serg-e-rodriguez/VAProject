@@ -49,12 +49,28 @@ def _resolve_secret(keys: list[str] | str, default_val: str = "") -> str:
 
     return val.strip().strip('"').strip("'")
 
-# Meta Ad Library API App Token
-# Permissions for the Meta Ad Library API are granted as an App Token (META_APP_TOKEN).
-# SECURITY MANDATE: Never hardcode or include the Meta App Token in code.
-META_APP_TOKEN: str = _resolve_secret(["META_APP_TOKEN", "META_AD_TOKEN", "MetaAd"], default_val="")
-# Backward-compatibility alias
-META_AD_TOKEN: str = META_APP_TOKEN
+# Meta Ad Library API User Token
+# Permissions for the Meta Ad Library API are granted via a User Token (META_USER_TOKEN)
+# with the following required permissions:
+# - ads_management
+# - ads_read
+# - business_management
+# - pages_read_engagement
+# - pages_manage_ads
+# - leads_retrieval
+# SECURITY MANDATE: Never hardcode or include the Meta User Token in code.
+META_REQUIRED_PERMISSIONS: list[str] = [
+    "ads_management",
+    "ads_read",
+    "business_management",
+    "pages_read_engagement",
+    "pages_manage_ads",
+    "leads_retrieval"
+]
+META_USER_TOKEN: str = _resolve_secret(["META_USER_TOKEN", "META_APP_TOKEN", "META_AD_TOKEN", "MetaAd"], default_val="")
+# Backward-compatibility aliases
+META_APP_TOKEN: str = META_USER_TOKEN
+META_AD_TOKEN: str = META_USER_TOKEN
 
 GCP_PROJECT_ID: str = _resolve_secret(["GCP_PROJECT_ID", "BigQuery"], default_val="virtualanalytics5122")
 GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")

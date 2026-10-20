@@ -61,8 +61,9 @@ def generate_mock_creative_stats(n: int = 1500) -> pd.DataFrame:
     ]
     age_probs = [0.05, 0.11, 0.17, 0.22, 0.24, 0.15, 0.03, 0.015, 0.01, 0.003, 0.001, 0.001]
     
-    gender_options = ["Female, Male", "Female", "Male", "Not targeted"]
-    gender_probs = [0.65, 0.18, 0.14, 0.03]
+    # In Google Political Ads transparency data, US election ads do not target by gender ('Not targeted')
+    gender_options = ["Not targeted"]
+    gender_probs = [1.0]
 
     impression_buckets = [
         "≤10000", "10000-25000", "25000-50000", "50000-100000",

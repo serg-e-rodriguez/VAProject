@@ -10,6 +10,14 @@ from __future__ import annotations
 import altair as alt
 import pandas as pd
 
+try:
+    from src.data.preprocessor import check_gender_data_exists
+except ModuleNotFoundError:
+    try:
+        from data.preprocessor import check_gender_data_exists
+    except ModuleNotFoundError:
+        def check_gender_data_exists(df: pd.DataFrame, col: str) -> bool:
+            return False
 
 METRIC_CONFIG = {
     "Estimated Impressions": {
@@ -149,10 +157,13 @@ def create_nc_demographic_gap_chart(
 def create_nc_gender_breakdown_chart(
     df: pd.DataFrame,
     metric_label: str = "Estimated Impressions"
-) -> alt.Chart:
-    """Visualizes gender targeting distribution across North Carolina voters."""
-    if df.empty or "gender_targeting" not in df.columns:
-        return alt.Chart(pd.DataFrame()).mark_text()
+) -> alt.Chart | None:
+    """
+    Visualizes gender targeting distribution across North Carolina voters.
+    Returns None if gender data does not exist in the dataset.
+    """
+    if not check_gender_data_exists(df, "gender_targeting"):
+        return None
 
     cfg = METRIC_CONFIG.get(metric_label, METRIC_CONFIG["Estimated Impressions"])
     col = cfg["col"]
@@ -378,10 +389,13 @@ def create_meta_demographic_delivery_chart(
 def create_meta_gender_reach_chart(
     df_meta_demo: pd.DataFrame,
     metric_label: str = "Estimated Impressions"
-) -> alt.Chart:
-    """Visualizes delivered reach breakdown between Female and Male voters on Meta platforms."""
-    if df_meta_demo.empty or "gender" not in df_meta_demo.columns:
-        return alt.Chart(pd.DataFrame()).mark_text()
+) -> alt.Chart | None:
+    """
+    Visualizes delivered reach breakdown between Female and Male voters on Meta platforms.
+    Returns None if gender data does not exist in the dataset.
+    """
+    if not check_gender_data_exists(df_meta_demo, "gender"):
+        return None
 
     col = "demographic_spend_usd" if "Spend" in metric_label else "demographic_impressions"
     fmt = "$,.2f" if "Spend" in metric_label else ","

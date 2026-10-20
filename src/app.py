@@ -34,6 +34,7 @@ try:
         clean_advertiser_weekly_spend,
         unnest_demographics,
         process_meta_demographics,
+        check_gender_data_exists,
         generate_nc_county_spend,
         VALID_AGE_COHORTS,
         NC_DMAS
@@ -90,6 +91,7 @@ except ModuleNotFoundError:
         clean_advertiser_weekly_spend,
         unnest_demographics,
         process_meta_demographics,
+        check_gender_data_exists,
         generate_nc_county_spend,
         VALID_AGE_COHORTS,
         NC_DMAS
@@ -334,14 +336,18 @@ def main():
     # -----------------------------------------------------------
     # Main Dashboard Tabs (Overview First, Specific Deep Dives After)
     # -----------------------------------------------------------
-    tab_overview, tab_demo, tab_creative, tab_geo, tab_pace, tab_info = st.tabs([
-        "📊 Executive Campaign Overview",
-        "🎯 Demographic Opportunity & Gap Analysis (NC)",
-        "🎬 Targeted Ad Formats & Creative Intelligence",
-        "🗺️ Regional Competitor Spend & NC County Heatmap",
-        "📈 Platform Performance & Pacing (2024–Current)",
-        "ℹ️ Key Dataset Facts & Methodology"
-    ])
+    tab_overview, tab_demo, tab_creative, tab_geo, tab_pace, tab_info = st.tabs(
+        [
+            "📊 Executive Campaign Overview",
+            "🎯 Demographic Opportunity & Gap Analysis (NC)",
+            "🎬 Targeted Ad Formats & Creative Intelligence",
+            "🗺️ Regional Competitor Spend & NC County Heatmap",
+            "📈 Platform Performance & Pacing (2024–Current)",
+            "ℹ️ Key Dataset Facts & Methodology"
+        ],
+        key="active_tab",
+        bind="query-params"
+    )
 
     # =========================================================================
     # TAB 1: EXECUTIVE CAMPAIGN OVERVIEW (Overview of the data)
@@ -491,18 +497,40 @@ def main():
                 unsafe_allow_html=True
             )
 
-            g_ctrl1, g_ctrl2 = st.columns(2)
-            with g_ctrl1:
-                g_demo_choice = st.selectbox(
-                    "Select Google Demographic Dimension:",
-                    options=[
-                        "Voter Age Cohorts (Google Targeting Opportunity Gap)",
-                        "Gender Targeting Distribution (Google Ads)"
-                    ],
-                    index=0,
-                    key="g_demo_choice_select"
+            has_google_gender = check_gender_data_exists(clean_bq, "gender_targeting")
+
+            if has_google_gender:
+                g_ctrl1, g_ctrl2 = st.columns(2)
+                with g_ctrl1:
+                    g_metric_choice = st.selectbox(
+                        "Select Metric (Y-Axis):",
+                        options=[
+                            "Estimated Impressions",
+                            "Estimated Spend ($ USD)",
+                            "Number of Ad Creatives"
+                        ],
+                        index=0,
+                        key="g_metric_choice_select"
+                    )
+                g_col1, g_col2 = st.columns(2)
+                with g_col1:
+                    g_chart = create_nc_demographic_gap_chart(unnested_demo, metric_label=g_metric_choice)
+                    st.altair_chart(g_chart, width="stretch", theme="streamlit")
+                with g_col2:
+                    unnested_gender = unnest_demographics(clean_bq, "gender_targeting")
+                    g_gender_chart = create_nc_gender_breakdown_chart(unnested_gender, metric_label=g_metric_choice)
+                    if g_gender_chart:
+                        st.altair_chart(g_gender_chart, width="stretch", theme="streamlit")
+            else:
+                # BigQuery gender data does not exist; do not create chart and remove single-option dropdown
+                st.markdown(
+                    """<div style="background: rgba(15, 23, 42, 0.65); border: 1px solid #334155; border-radius: 8px; padding: 10px 16px; margin-bottom: 14px; font-size: 13px; color: #94a3b8;">
+                        ℹ️ <strong>Google Targeting Dimension:</strong> Google Political Ads in North Carolina exclusively utilizes 
+                        geographic media market and voter age targeting (gender targeting is unconfigured / <code>Not targeted</code>). 
+                        Gender chart is omitted. Displaying full NC voter age cohort opportunity gap analysis below.
+                    </div>""",
+                    unsafe_allow_html=True
                 )
-            with g_ctrl2:
                 g_metric_choice = st.selectbox(
                     "Select Metric (Y-Axis):",
                     options=[
@@ -513,14 +541,8 @@ def main():
                     index=0,
                     key="g_metric_choice_select"
                 )
-
-            if g_demo_choice == "Voter Age Cohorts (Google Targeting Opportunity Gap)":
                 g_chart = create_nc_demographic_gap_chart(unnested_demo, metric_label=g_metric_choice)
                 st.altair_chart(g_chart, width="stretch", theme="streamlit")
-            else:
-                unnested_gender = unnest_demographics(clean_bq, "gender_targeting")
-                g_gender_chart = create_nc_gender_breakdown_chart(unnested_gender, metric_label=g_metric_choice)
-                st.altair_chart(g_gender_chart, width="stretch", theme="streamlit")
 
             g_insights = generate_google_demographic_insights(clean_bq)
             st.markdown(
@@ -566,35 +588,33 @@ def main():
                 unsafe_allow_html=True
             )
 
-            m_ctrl1, m_ctrl2 = st.columns(2)
-            with m_ctrl1:
-                m_demo_choice = st.selectbox(
-                    "Select Meta Delivery Dimension:",
-                    options=[
-                        "Delivered Reach by Age Cohort (Meta API)",
-                        "Gender Reach Distribution (Meta API)"
-                    ],
-                    index=0,
-                    key="m_demo_choice_select"
-                )
-            with m_ctrl2:
-                m_metric_choice = st.selectbox(
-                    "Select Metric:",
-                    options=[
-                        "Delivered Impressions",
-                        "Delivered Spend ($ USD)",
-                        "Number of Ad Creatives"
-                    ],
-                    index=0,
-                    key="m_metric_choice_select"
-                )
+            has_meta_gender = check_gender_data_exists(df_meta_demo, "gender")
 
-            if m_demo_choice == "Delivered Reach by Age Cohort (Meta API)":
+            m_metric_choice = st.selectbox(
+                "Select Metric (Measure):",
+                options=[
+                    "Delivered Impressions",
+                    "Delivered Spend ($ USD)",
+                    "Number of Ad Creatives"
+                ],
+                index=0,
+                key="m_metric_choice_select"
+            )
+
+            if has_meta_gender:
+                # Display Age Cohort delivery and Gender Reach side-by-side cleanly without redundant dropdown
+                m_col1, m_col2 = st.columns(2)
+                with m_col1:
+                    m_chart = create_meta_demographic_delivery_chart(df_meta_demo, metric_label=m_metric_choice)
+                    st.altair_chart(m_chart, width="stretch", theme="streamlit")
+                with m_col2:
+                    m_gender_chart = create_meta_gender_reach_chart(df_meta_demo, metric_label=m_metric_choice)
+                    if m_gender_chart:
+                        st.altair_chart(m_gender_chart, width="stretch", theme="streamlit")
+            else:
+                # Render only age delivery chart when gender data does not exist
                 m_chart = create_meta_demographic_delivery_chart(df_meta_demo, metric_label=m_metric_choice)
                 st.altair_chart(m_chart, width="stretch", theme="streamlit")
-            else:
-                m_gender_chart = create_meta_gender_reach_chart(df_meta_demo, metric_label=m_metric_choice)
-                st.altair_chart(m_gender_chart, width="stretch", theme="streamlit")
 
             m_insights = generate_meta_demographic_insights(df_meta_demo)
             st.markdown(
@@ -710,28 +730,51 @@ def main():
                 google_creatives = clean_bq
 
             st.subheader("Filter Google Ad Targeting Parameters")
-            g_f1, g_f2, g_f3 = st.columns(3)
-            with g_f1:
-                g_filter_age = st.selectbox(
-                    "Target Age Group (Google):",
-                    options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65", "Broad / Untargeted"],
-                    index=0,
-                    key="g_creative_target_age"
-                )
-            with g_f2:
-                g_filter_gender = st.selectbox(
-                    "Target Gender Segment (Google):",
-                    options=["All Genders", "Female", "Male", "Broad / Untargeted"],
-                    index=0,
-                    key="g_creative_target_gender"
-                )
-            with g_f3:
-                g_filter_metric = st.selectbox(
-                    "Measure (Y-Axis):",
-                    options=["Estimated Spend ($ USD)", "Estimated Impressions", "Number of Ad Creatives"],
-                    index=0,
-                    key="g_creative_target_metric"
-                )
+            has_google_gender = check_gender_data_exists(google_creatives, "gender_targeting")
+
+            if has_google_gender:
+                g_f1, g_f2, g_f3 = st.columns(3)
+                with g_f1:
+                    g_filter_age = st.selectbox(
+                        "Target Age Group (Google):",
+                        options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65", "Broad / Untargeted"],
+                        index=0,
+                        key="g_creative_target_age"
+                    )
+                with g_f2:
+                    g_filter_gender = st.selectbox(
+                        "Target Gender Segment (Google):",
+                        options=["All Genders", "Female", "Male", "Broad / Untargeted"],
+                        index=0,
+                        key="g_creative_target_gender"
+                    )
+                with g_f3:
+                    g_filter_metric = st.selectbox(
+                        "Measure (Y-Axis):",
+                        options=["Estimated Spend ($ USD)", "Estimated Impressions", "Number of Ad Creatives"],
+                        index=0,
+                        key="g_creative_target_metric"
+                    )
+                g_tag = f"[{g_filter_age} | {g_filter_gender}]" if g_filter_gender != "All Genders" else f"[{g_filter_age}]"
+            else:
+                # BigQuery gender data does not exist; remove redundant gender dropdown
+                g_f1, g_f2 = st.columns(2)
+                with g_f1:
+                    g_filter_age = st.selectbox(
+                        "Target Age Group (Google):",
+                        options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65", "Broad / Untargeted"],
+                        index=0,
+                        key="g_creative_target_age"
+                    )
+                with g_f2:
+                    g_filter_metric = st.selectbox(
+                        "Measure (Y-Axis):",
+                        options=["Estimated Spend ($ USD)", "Estimated Impressions", "Number of Ad Creatives"],
+                        index=0,
+                        key="g_creative_target_metric"
+                    )
+                g_filter_gender = "All Genders"
+                g_tag = f"[{g_filter_age}]"
 
             filtered_google = filter_google_creatives(
                 google_creatives,
@@ -748,7 +791,7 @@ def main():
 
             st.markdown(
                 f"""<div class="success-box">
-                    <strong>Google Finding for [{g_filter_age} | {g_filter_gender}]:</strong> 
+                    <strong>Google Finding for {g_tag}:</strong> 
                     Found <strong>{g_total_creatives:,} active creatives</strong>. 
                     <strong>YouTube Video represents {g_video_spend_pct:.1f}% (${g_video_spend:,.0f})</strong> of total spend 
                     targeting this demographic, demonstrating campaigns' heavy reliance on video persuasion on Google.
@@ -826,28 +869,50 @@ def main():
             )
 
             st.subheader("Filter Target Demographic for Meta Video & Creative Format Analysis")
-            m_f1, m_f2, m_f3 = st.columns(3)
-            with m_f1:
-                m_filter_age = st.selectbox(
-                    "Target Age Group (Meta):",
-                    options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65"],
-                    index=0,
-                    key="m_creative_target_age"
-                )
-            with m_f2:
-                m_filter_gender = st.selectbox(
-                    "Target Gender Segment (Meta):",
-                    options=["All Genders", "Female", "Male"],
-                    index=0,
-                    key="m_creative_target_gender"
-                )
-            with m_f3:
-                m_filter_metric = st.selectbox(
-                    "Select Measure (Meta):",
-                    options=["Delivered Impressions", "Delivered Spend ($ USD)", "Number of Ad Creatives"],
-                    index=0,
-                    key="m_creative_target_metric"
-                )
+            has_meta_gender = check_gender_data_exists(df_meta_demo, "gender")
+
+            if has_meta_gender:
+                m_f1, m_f2, m_f3 = st.columns(3)
+                with m_f1:
+                    m_filter_age = st.selectbox(
+                        "Target Age Group (Meta):",
+                        options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65"],
+                        index=0,
+                        key="m_creative_target_age"
+                    )
+                with m_f2:
+                    m_filter_gender = st.selectbox(
+                        "Target Gender Segment (Meta):",
+                        options=["All Genders", "Female", "Male"],
+                        index=0,
+                        key="m_creative_target_gender"
+                    )
+                with m_f3:
+                    m_filter_metric = st.selectbox(
+                        "Select Measure (Meta):",
+                        options=["Delivered Impressions", "Delivered Spend ($ USD)", "Number of Ad Creatives"],
+                        index=0,
+                        key="m_creative_target_metric"
+                    )
+                m_tag = f"[{m_filter_age} | {m_filter_gender}]" if m_filter_gender != "All Genders" else f"[{m_filter_age}]"
+            else:
+                m_f1, m_f2 = st.columns(2)
+                with m_f1:
+                    m_filter_age = st.selectbox(
+                        "Target Age Group (Meta):",
+                        options=["All Ages", "18-24", "25-34", "35-44", "45-54", "55-64", "≥65"],
+                        index=0,
+                        key="m_creative_target_age"
+                    )
+                with m_f2:
+                    m_filter_metric = st.selectbox(
+                        "Select Measure (Meta):",
+                        options=["Delivered Impressions", "Delivered Spend ($ USD)", "Number of Ad Creatives"],
+                        index=0,
+                        key="m_creative_target_metric"
+                    )
+                m_filter_gender = "All Genders"
+                m_tag = f"[{m_filter_age}]"
 
             filtered_meta_demo = filter_meta_demographics(
                 df_meta_demo,
@@ -861,7 +926,7 @@ def main():
 
             st.markdown(
                 f"""<div class="success-box">
-                    <strong>Meta Delivery Finding for [{m_filter_age} | {m_filter_gender}]:</strong> 
+                    <strong>Meta Delivery Finding for {m_tag}:</strong> 
                     Delivered <strong>{m_tot_imps:,.0f} impressions</strong> to this voter cohort. 
                     <strong>Video Ads generate {m_vid_pct:.1f}%</strong> of total audience impressions delivered to this North Carolina segment, 
                     reinforcing high engagement for short-form video in Meta feeds and Reels.
@@ -887,16 +952,21 @@ def main():
                 )
                 st.altair_chart(m_cpm_chart, width="stretch", theme="streamlit")
 
-            # Demographic Video Distribution Across Age Groups & Genders (Meta API)
+            # Demographic Video Distribution Across Age Groups (and Gender if present)
             st.subheader("Demographic Video Adoption Curve Across North Carolina Voters (Meta API)")
             if not df_meta_demo.empty:
-                v_col1, v_col2 = st.columns(2)
-                with v_col1:
+                if has_meta_gender:
+                    v_col1, v_col2 = st.columns(2)
+                    with v_col1:
+                        video_adoption_chart = create_video_adoption_by_demographic_chart(df_meta_demo)
+                        st.altair_chart(video_adoption_chart, width="stretch", theme="streamlit")
+                    with v_col2:
+                        gender_breakdown_chart = create_gender_video_breakdown_chart(df_meta_demo)
+                        if gender_breakdown_chart:
+                            st.altair_chart(gender_breakdown_chart, width="stretch", theme="streamlit")
+                else:
                     video_adoption_chart = create_video_adoption_by_demographic_chart(df_meta_demo)
                     st.altair_chart(video_adoption_chart, width="stretch", theme="streamlit")
-                with v_col2:
-                    gender_breakdown_chart = create_gender_video_breakdown_chart(df_meta_demo)
-                    st.altair_chart(gender_breakdown_chart, width="stretch", theme="streamlit")
 
             # Automated Meta Creative Strategic Insights
             m_creative_insights = generate_meta_creative_insights(df_meta_demo)
@@ -961,9 +1031,6 @@ def main():
                 "Select Regional Graph Dimension:",
                 options=[
                     "NC County Heatmap (Applied Over NC Counties Map Image)",
-                    "NC County Spatial Coordinate Heatmap",
-                    "NC County Spend Heatmap (Ranked Intensity Bar)",
-                    "NC County Geographic Heatmap (Choropleth Map)",
                     "NC Media Market (DMA) Intensity Ranking",
                     "Competitor PAC Breakdown by NC Market",
                     "Competitor Market Share (% of NC Market Total)"
@@ -983,13 +1050,16 @@ def main():
                 key="geo_metric_select"
             )
 
-        # Synchronize selected county across URL query parameters and session state
+        # Selected county state initialization
         county_list = df_county["county_name"].tolist() if not df_county.empty else ["Mecklenburg"]
         query_county = st.query_params.get("county", None)
-        if "selected_county" not in st.session_state:
-            st.session_state.selected_county = "Mecklenburg"
-        if query_county and query_county in county_list:
-            st.session_state.selected_county = query_county
+
+        # Default initialization for selected_county if not set
+        if "selected_county" not in st.session_state or st.session_state.selected_county not in county_list:
+            st.session_state.selected_county = query_county if (query_county and query_county in county_list) else "Mecklenburg"
+            st.session_state.deepdive_county_picker = st.session_state.selected_county
+        elif "deepdive_county_picker" not in st.session_state or st.session_state.deepdive_county_picker not in county_list:
+            st.session_state.deepdive_county_picker = st.session_state.selected_county
 
         # Top summary KPIs for counties
         if not df_county.empty:
@@ -1012,20 +1082,7 @@ def main():
                 selected_county=st.session_state.selected_county,
                 metric_label=geo_metric_choice
             )
-            st.iframe(svg_html, height=920, width="stretch")
-
-        elif geo_chart_choice == "NC County Spatial Coordinate Heatmap":
-            spatial_map = create_nc_county_spatial_heatmap_chart(df_county, metric_label=geo_metric_choice)
-            st.altair_chart(spatial_map, width="stretch", theme="streamlit")
-
-        elif geo_chart_choice == "NC County Spend Heatmap (Ranked Intensity Bar)":
-            county_heatmap = create_nc_county_heatmap_chart(df_county, metric_label=geo_metric_choice)
-            st.altair_chart(county_heatmap, width="stretch", theme="streamlit")
-
-        elif geo_chart_choice == "NC County Geographic Heatmap (Choropleth Map)":
-            st.markdown("Geographic distribution of advertising expenditures across North Carolina counties:")
-            choropleth_map = create_nc_county_choropleth_chart(df_county, metric_label=geo_metric_choice)
-            st.altair_chart(choropleth_map, width="stretch", theme="streamlit")
+            st.iframe(svg_html, height=860, width="stretch")
 
         elif geo_chart_choice == "NC Media Market (DMA) Intensity Ranking":
             dma_chart = create_nc_dma_ranking_chart(cleaned_geo, metric_label=geo_metric_choice)
@@ -1090,7 +1147,7 @@ def main():
                             🏛️ Strategic County Deep-Dive: <span style="color: #38bdf8;">{active_county} County</span> Intelligence Profile
                         </h3>
                         <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13px;">
-                            Synchronized with County Heatmap clicks. Review how much each campaign has spent in this region alongside Meta Ad Library voter age targeting.
+                            Synchronized with County Heatmap selection & highlighting. Review how much each campaign has spent in this region alongside Meta Ad Library voter age targeting.
                         </p>
                     </div>
                     <div style="background: rgba(2, 132, 199, 0.2); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 14px; color: #38bdf8; font-size: 12.5px; font-weight: 700;">
@@ -1102,20 +1159,21 @@ def main():
             unsafe_allow_html=True
         )
 
+        def on_county_dropdown_change():
+            chosen = st.session_state.deepdive_county_picker
+            st.session_state.selected_county = chosen
+            st.query_params["county"] = chosen
+
         # Drop-down and Metric Controls for Deep-Dive Display
         deep_ctrl1, deep_ctrl2 = st.columns([2, 1])
         with deep_ctrl1:
-            chosen_county = st.selectbox(
+            st.selectbox(
                 "📍 Select North Carolina County to Gather Intelligence:",
                 options=county_list,
-                index=county_list.index(active_county) if active_county in county_list else 0,
                 key="deepdive_county_picker",
-                help="Switch between counties or click directly on any county node on the heatmap above to update this display."
+                on_change=on_county_dropdown_change,
+                help="Select a North Carolina county from this dropdown menu to highlight it on the heatmap and view additional spending and demographic intelligence below."
             )
-            if chosen_county != active_county:
-                st.session_state.selected_county = chosen_county
-                st.query_params["county"] = chosen_county
-                st.rerun()
 
         with deep_ctrl2:
             deep_metric = st.selectbox(
@@ -1124,17 +1182,6 @@ def main():
                 index=0,
                 key="deepdive_metric_picker"
             )
-
-        # Quick-Pick Battleground County Chips
-        st.markdown("<div style='font-size: 12px; color: #94a3b8; margin-bottom: 8px;'><strong>Battleground County Shortcuts:</strong></div>", unsafe_allow_html=True)
-        chip_cols = st.columns(7)
-        quick_picks = ["Mecklenburg", "Wake", "Guilford", "Forsyth", "Cumberland", "Durham", "Buncombe"]
-        for idx, q_c in enumerate(quick_picks):
-            with chip_cols[idx]:
-                if st.button(f"📍 {q_c}", key=f"chip_btn_{q_c}", use_container_width=True):
-                    st.session_state.selected_county = q_c
-                    st.query_params["county"] = q_c
-                    st.rerun()
 
         # 4 High-Impact KPI Cards for this County
         c_kpi_col1, c_kpi_col2, c_kpi_col3, c_kpi_col4 = st.columns(4)
@@ -1293,7 +1340,7 @@ def main():
             * **Demographic Separation:** Google targeting settings and Meta empirical audience delivery distributions are analyzed separately to prevent false equivalencies.
             * **Ad Types / Formats Separation:** Google BigQuery and Meta Ad Library data are divided into dedicated subsections to clearly differentiate YouTube/Search advertising from Facebook/Instagram social formats.
             * **Meta API Video & Demographic Breakdown:** The Meta Ad Library API's `demographic_distribution` breakdown is processed to reveal what types of ads (Video vs. Image vs. Text) are delivered to each specific age group and gender segment.
-            * **Meta App Token Permissions & Security:** Access to the Meta Ad Library API requires an authorized **Meta App Token** with verified app permissions. In accordance with strict security standards, the Meta App Token is never included in source code and is loaded strictly through runtime environment variables.
+            * **Meta User Token Permissions & Security:** Access to the Meta Ad Library API requires an authorized **Meta User Token** configured with the verified permissions: `ads_management`, `ads_read`, `business_management`, `pages_read_engagement`, `pages_manage_ads`, and `leads_retrieval`. In accordance with strict security standards, the Meta User Token is never included or committed in source code and is loaded strictly through runtime environment variables (`META_USER_TOKEN`).
             """)
 
             st.markdown("""

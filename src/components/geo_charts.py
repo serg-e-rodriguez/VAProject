@@ -10,6 +10,15 @@ from __future__ import annotations
 import altair as alt
 import pandas as pd
 
+try:
+    from src.data.preprocessor import check_gender_data_exists
+except ModuleNotFoundError:
+    try:
+        from data.preprocessor import check_gender_data_exists
+    except ModuleNotFoundError:
+        def check_gender_data_exists(df: pd.DataFrame, col: str) -> bool:
+            return False
+
 
 METRIC_CONFIG = {
     "Total Spend ($ USD)": {
@@ -445,9 +454,9 @@ def generate_nc_county_map_heatmap_svg(
     - Expanded 1200x800 canvas (2.0x base scale) providing ample breathing room for points and labels.
     - Overlays radiant heatmap blooms and county spending nodes directly on top of `nc.jpg`.
     - Point placements strictly calibrated to match real county locations from `nccountynames.jpg`.
-    - Interactive county click handler: clicking any county updates HUD and synchronizes with Streamlit deep-dive display.
-    - Prominently highlights the currently selected county with a pulsating selection ring.
-    - Completely non-scrollable and expands to use up the full available container space without scrolling.
+    - Synchronized with Streamlit county dropdown selection: selecting any county highlights it on the map and updates the deep-dive display.
+    - Prominently highlights the currently selected county with a multi-layered pulsating beacon, dashed rotating ring, cyan glow, and floating pin badge.
+    - Completely non-scrollable and expands to use up the full available container space without scrolling or HUD clutter.
     - Note: nccountynames.jpg is used exclusively for spatial context during development and is NOT displayed in the UI.
     """
     if df_county.empty:
@@ -501,7 +510,8 @@ def generate_nc_county_map_heatmap_svg(
     }
 
     heat_blooms_svg = []
-    county_markers_svg = []
+    normal_markers_svg = []
+    selected_marker_svg = []
 
     # Sort so smaller circles render on top of larger ones
     sorted_df = df_county.sort_values(by="spend_usd", ascending=True)
@@ -554,40 +564,59 @@ def generate_nc_county_map_heatmap_svg(
             ly = py + dy
             active_star = "★ " if is_selected else ""
             label_color = "#38bdf8" if is_selected else "#ffffff"
+            label_font_weight = "900" if is_selected else "700"
+            label_font_size = "14" if is_selected else "13"
             label_svg = (
-                f'<text x="{lx}" y="{ly}" fill="{label_color}" font-size="13" '
-                f'font-weight="700" text-anchor="{anchor}" '
-                f'paint-order="stroke fill" stroke="#070d18" stroke-width="5" stroke-linejoin="round" '
+                f'<text x="{lx}" y="{ly}" fill="{label_color}" font-size="{label_font_size}" '
+                f'font-weight="{label_font_weight}" text-anchor="{anchor}" '
+                f'paint-order="stroke fill" stroke="#070d18" stroke-width="5.5" stroke-linejoin="round" '
                 f'filter="url(#text-shadow)">'
-                f'{active_star}{c_name} <tspan font-weight="500" fill="#cbd5e1">(${spend/1e3:,.0f}k)</tspan></text>'
+                f'{active_star}{c_name} <tspan font-weight="600" fill="#cbd5e1">(${spend/1e3:,.0f}k)</tspan></text>'
             )
 
-        # Active pulsating ring if selected
-        active_ring_svg = ""
         if is_selected:
+            # Multi-layered pulsating beacon and pin badge for selected county
             active_ring_svg = (
-                f'<circle cx="{px}" cy="{py}" r="{node_r + 9}" fill="none" stroke="#38bdf8" stroke-width="3.5" stroke-dasharray="6,4">'
-                f'<animate attributeName="r" values="{node_r + 7};{node_r + 14};{node_r + 7}" dur="2.4s" repeatCount="indefinite" />'
-                f'<animate attributeName="opacity" values="1;0.4;1" dur="2.4s" repeatCount="indefinite" />'
+                f'<circle cx="{px}" cy="{py}" r="{node_r + 6}" fill="none" stroke="#38bdf8" stroke-width="2.8" opacity="0.9">'
+                f'<animate attributeName="r" values="{node_r + 6};{node_r + 32}" dur="2s" repeatCount="indefinite" />'
+                f'<animate attributeName="opacity" values="0.9;0" dur="2s" repeatCount="indefinite" />'
                 f'</circle>'
+                f'<circle cx="{px}" cy="{py}" r="{node_r + 11}" fill="none" stroke="#38bdf8" stroke-width="3" stroke-dasharray="5,4">'
+                f'<animateTransform attributeName="transform" type="rotate" from="0 {px} {py}" to="360 {px} {py}" dur="5s" repeatCount="indefinite" />'
+                f'</circle>'
+                f'<circle cx="{px}" cy="{py}" r="{node_r + 4}" fill="none" stroke="#ffffff" stroke-width="2.5" />'
             )
-
-        active_class = "active-node" if is_selected else ""
-        node_stroke = "#38bdf8" if is_selected else "#ffffff"
-        node_stroke_w = "3.5" if is_selected else "2.2"
-
-        county_markers_svg.append(f"""
-        <g class="county-node {active_class}" data-name="{c_name}" data-dma="{dma}" data-spend="${spend:,.2f}" data-imp="{impressions:,}" data-tier="{tier}" onclick="handleCountyClick('{c_name}')">
-            {active_ring_svg}
-            <circle cx="{px}" cy="{py}" r="{node_r}" fill="{color}" stroke="{node_stroke}" stroke-width="{node_stroke_w}" opacity="0.96">
-                <title>{c_name} County ({dma})&#10;Spend: ${spend:,.2f}&#10;Impressions: {impressions:,}&#10;Tier: {tier}&#10;Click to gather detailed intelligence below</title>
-            </circle>
-            {label_svg}
-        </g>
-        """)
+            # Floating Callout Badge Pin directly above the selected county
+            badge_y = py - node_r - 26
+            badge_svg = (
+                f'<g class="selected-badge" transform="translate({px}, {badge_y})">'
+                f'<rect x="-80" y="-13" width="160" height="26" rx="13" fill="#0284c7" stroke="#ffffff" stroke-width="2.2" filter="url(#text-shadow)"/>'
+                f'<text x="0" y="4" fill="#ffffff" font-size="11.5" font-weight="800" text-anchor="middle" filter="url(#text-shadow)">📍 {c_name.upper()} (SELECTED)</text>'
+                f'</g>'
+            )
+            selected_marker_svg.append(f"""
+            <g class="county-node active-node" data-name="{c_name}" data-dma="{dma}" data-spend="${spend:,.2f}" data-imp="{impressions:,}" data-tier="{tier}">
+                {active_ring_svg}
+                <circle class="node-main-circle" cx="{px}" cy="{py}" r="{node_r + 2}" fill="{color}" stroke="#38bdf8" stroke-width="4.5" filter="url(#selected-glow)" opacity="1">
+                    <title>{c_name} County ({dma}) [SELECTED]&#10;Spend: ${spend:,.2f}&#10;Impressions: {impressions:,}&#10;Tier: {tier}</title>
+                </circle>
+                {label_svg}
+                {badge_svg}
+            </g>
+            """)
+        else:
+            normal_markers_svg.append(f"""
+            <g class="county-node" data-name="{c_name}" data-dma="{dma}" data-spend="${spend:,.2f}" data-imp="{impressions:,}" data-tier="{tier}">
+                <circle class="node-main-circle" cx="{px}" cy="{py}" r="{node_r}" fill="{color}" stroke="#ffffff" stroke-width="2.2" opacity="0.96">
+                    <title>{c_name} County ({dma})&#10;Spend: ${spend:,.2f}&#10;Impressions: {impressions:,}&#10;Tier: {tier}</title>
+                </circle>
+                {label_svg}
+            </g>
+            """)
 
     blooms_str = "\n".join(heat_blooms_svg)
-    nodes_str = "\n".join(county_markers_svg)
+    # Selected county marker is appended LAST so it renders at the absolute top layer
+    nodes_str = "\n".join(normal_markers_svg + selected_marker_svg)
 
     html_content = f"""<!DOCTYPE html>
 <html>
@@ -646,44 +675,23 @@ svg {{
     background: #070d18;
 }}
 .county-node {{
-    cursor: pointer;
+    cursor: default;
+    pointer-events: all;
     transition: transform 0.15s ease;
 }}
-.county-node:hover circle {{
+.county-node * {{
+    cursor: default;
+    pointer-events: all;
+}}
+.county-node:hover .node-main-circle {{
     stroke: #38bdf8 !important;
-    stroke-width: 4px !important;
+    stroke-width: 4.5px !important;
     opacity: 1 !important;
+    filter: url(#selected-glow) !important;
 }}
-.active-node circle {{
+.active-node .node-main-circle {{
     stroke: #38bdf8 !important;
-    stroke-width: 4px !important;
-}}
-.tooltip-hud {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 20px;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid #334155;
-    border-radius: 10px;
-    font-size: 13px;
-    color: #e2e8f0;
-    margin-top: 8px;
-    flex-shrink: 0;
-}}
-.hud-btn {{
-    background: #0284c7;
-    color: #ffffff;
-    border: none;
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-left: 8px;
-}}
-.hud-btn:hover {{
-    background: #38bdf8;
+    stroke-width: 4.5px !important;
 }}
 </style>
 </head>
@@ -693,11 +701,11 @@ svg {{
         <div>
             <h4 style="margin:0; color:#f8fafc; font-size:18px; font-weight:700;">🗺️ North Carolina Regional Competitor Spend Heatmap (Enlarged Canvas)</h4>
             <p style="margin:3px 0 0 0; color:#94a3b8; font-size:12.5px;">
-                Overlaying ad spend onto North Carolina (<strong>nc.jpg</strong>) • <strong>Click any county node</strong> to inspect competitor spend and Meta age targeting below
+                Overlaying ad spend onto North Carolina (<strong>nc.jpg</strong>) • Select any county in the dropdown menu below to highlight & inspect analytics
             </p>
         </div>
-        <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid #38bdf8; border-radius: 8px; padding: 6px 14px; font-size: 12.5px; color: #38bdf8; font-weight:600;">
-            Active Selection: <strong>{selected_county} County</strong>
+        <div style="background: rgba(15, 23, 42, 0.85); border: 1.5px solid #38bdf8; border-radius: 8px; padding: 6px 14px; font-size: 13px; color: #38bdf8; font-weight:700;">
+            📍 Highlighted: <strong>{selected_county} County</strong>
         </div>
     </div>
 
@@ -710,6 +718,10 @@ svg {{
                 </filter>
                 <filter id="text-shadow" x="-20%" y="-20%" width="140%" height="140%">
                     <feDropShadow dx="0" dy="1.5" stdDeviation="3" flood-color="#000000" flood-opacity="0.95"/>
+                </filter>
+                <filter id="selected-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#38bdf8" flood-opacity="1"/>
+                    <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#0284c7" flood-opacity="0.8"/>
                 </filter>
                 <linearGradient id="legend-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stop-color="#38bdf8" />
@@ -751,56 +763,7 @@ svg {{
             </g>
         </svg>
     </div>
-
-    <!-- Active Hover & Click Detail Bar -->
-    <div class="tooltip-hud" id="tooltip-hud">
-        <div>
-            <span style="color:#94a3b8;">Selected County: </span>
-            <span id="hud-name" style="font-weight:700; color:#38bdf8;">{selected_county} County</span>
-            <span style="color:#64748b; margin: 0 8px;">•</span>
-            <span id="hud-dma" style="color:#cbd5e1;">Designated Market Area</span>
-        </div>
-        <div>
-            <span style="color:#94a3b8;">Estimated Spend: </span>
-            <span id="hud-spend" style="font-weight:700; color:#22c55e;">$0.00</span>
-            <span style="color:#64748b; margin: 0 8px;">•</span>
-            <span id="hud-tier" style="color:#f59e0b;">Spending Tier</span>
-            <span style="color:#64748b; margin: 0 8px;">•</span>
-            <span style="color:#38bdf8; font-size:12px;">👆 Click to update deep-dive display below</span>
-        </div>
-    </div>
 </div>
-
-<script>
-// Interactive hover and click handler for county nodes
-function updateHUD(name, dma, spend, tier) {{
-    document.getElementById('hud-name').textContent = name + ' County';
-    if (dma) document.getElementById('hud-dma').textContent = dma;
-    if (spend) document.getElementById('hud-spend').textContent = spend;
-    if (tier) document.getElementById('hud-tier').textContent = tier;
-}}
-
-function handleCountyClick(countyName) {{
-    updateHUD(countyName);
-    try {{
-        const parentUrl = new URL(window.parent.location.href);
-        parentUrl.searchParams.set("county", countyName);
-        window.parent.location.href = parentUrl.toString();
-    }} catch (e) {{
-        console.log("Could not update parent window:", e);
-    }}
-}}
-
-document.querySelectorAll('.county-node').forEach(node => {{
-    node.addEventListener('mouseenter', () => {{
-        const name = node.getAttribute('data-name');
-        const dma = node.getAttribute('data-dma');
-        const spend = node.getAttribute('data-spend');
-        const tier = node.getAttribute('data-tier');
-        updateHUD(name, dma, spend, tier);
-    }});
-}});
-</script>
 </body>
 </html>
 """
@@ -929,83 +892,145 @@ def create_county_meta_age_cohort_chart(
         y_title = "Delivered Ad Impressions"
 
     valid_cohorts = ["18-24", "25-34", "35-44", "45-54", "55-64", "≥65"]
+    has_gender = check_gender_data_exists(filtered, "gender")
 
-    # Filter strictly to canonical cohorts and non-empty gender (zero empty gaps)
-    clean_demo = filtered[
-        filtered["age_group"].isin(valid_cohorts) &
-        filtered["gender"].isin(["Female", "Male"]) &
-        filtered[metric_col].notna() &
-        (filtered[metric_col] > 0)
-    ].copy()
+    if has_gender:
+        # Filter strictly to canonical cohorts and non-empty gender (zero empty gaps)
+        clean_demo = filtered[
+            filtered["age_group"].isin(valid_cohorts) &
+            filtered["gender"].isin(["Female", "Male"]) &
+            filtered[metric_col].notna() &
+            (filtered[metric_col] > 0)
+        ].copy()
 
-    if clean_demo.empty:
-        return alt.Chart(pd.DataFrame({"msg": [f"No demographic delivery records for {county_name} ({dma})"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+        if clean_demo.empty:
+            return alt.Chart(pd.DataFrame({"msg": [f"No demographic delivery records for {county_name} ({dma})"]})).mark_text(color="#94a3b8").encode(text="msg:N")
 
-    agg = (
-        clean_demo.groupby(["age_group", "gender"], as_index=False)[metric_col]
-        .sum()
-    )
+        agg = (
+            clean_demo.groupby(["age_group", "gender"], as_index=False)[metric_col]
+            .sum()
+        )
 
-    max_val = agg[metric_col].max() if not agg.empty else 1.0
-    hover = alt.selection_point(on="mouseover", empty=True)
+        max_val = agg[metric_col].max() if not agg.empty else 1.0
+        hover = alt.selection_point(on="mouseover", empty=True)
 
-    chart = (
-        alt.Chart(agg)
-        .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
-        .encode(
-            x=alt.X(
-                "age_group:N",
-                sort=valid_cohorts,
-                title="Voter Age Cohort (Meta Ad Library)",
-                axis=alt.Axis(labelAngle=0, labelPadding=6, titlePadding=10)
-            ),
-            xOffset="gender:N",
-            y=alt.Y(
-                f"{metric_col}:Q",
-                title=y_title,
-                scale=alt.Scale(domainMax=max_val * 1.20 if max_val > 0 else 100),
-                axis=alt.Axis(format=fmt, grid=True, titlePadding=10, labelPadding=6)
-            ),
-            color=alt.Color(
-                "gender:N",
-                scale=alt.Scale(
-                    domain=["Female", "Male"],
-                    range=["#ec4899", "#3b82f6"]
+        chart = (
+            alt.Chart(agg)
+            .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4)
+            .encode(
+                x=alt.X(
+                    "age_group:N",
+                    sort=valid_cohorts,
+                    title="Voter Age Cohort (Meta Ad Library)",
+                    axis=alt.Axis(labelAngle=0, labelPadding=6, titlePadding=10)
                 ),
-                legend=alt.Legend(title="Gender", orient="top", columns=2, titlePadding=6)
-            ),
-            opacity=alt.condition(hover, alt.value(1.0), alt.value(0.78)),
-            tooltip=[
-                alt.Tooltip("age_group:N", title="Age Cohort"),
-                alt.Tooltip("gender:N", title="Gender"),
-                alt.Tooltip(f"{metric_col}:Q", title=y_title, format=t_fmt)
-            ]
+                xOffset="gender:N",
+                y=alt.Y(
+                    f"{metric_col}:Q",
+                    title=y_title,
+                    scale=alt.Scale(domainMax=max_val * 1.20 if max_val > 0 else 100),
+                    axis=alt.Axis(format=fmt, grid=True, titlePadding=10, labelPadding=6)
+                ),
+                color=alt.Color(
+                    "gender:N",
+                    scale=alt.Scale(
+                        domain=["Female", "Male"],
+                        range=["#ec4899", "#3b82f6"]
+                    ),
+                    legend=alt.Legend(title="Gender", orient="top", columns=2, titlePadding=6)
+                ),
+                opacity=alt.condition(hover, alt.value(1.0), alt.value(0.78)),
+                tooltip=[
+                    alt.Tooltip("age_group:N", title="Age Cohort"),
+                    alt.Tooltip("gender:N", title="Gender"),
+                    alt.Tooltip(f"{metric_col}:Q", title=y_title, format=t_fmt)
+                ]
+            )
+            .add_params(hover)
+            .properties(
+                title=alt.TitleParams(
+                    text=f"Meta Ad Library Targeted Age Cohorts: {county_name} ({dma})",
+                    subtitle="Empirical ad delivery across voter age groups and gender demographics (Meta API)",
+                    fontSize=14,
+                    subtitleFontSize=11,
+                    subtitleColor="#94a3b8"
+                ),
+                height=280
+            )
         )
-        .add_params(hover)
-        .properties(
-            title=alt.TitleParams(
-                text=f"Meta Ad Library Targeted Age Cohorts: {county_name} ({dma})",
-                subtitle="Empirical ad delivery across voter age groups and gender demographics (Meta API)",
-                fontSize=14,
-                subtitleFontSize=11,
-                subtitleColor="#94a3b8"
-            ),
-            height=280
-        )
-    )
 
-    text = (
-        alt.Chart(agg)
-        .mark_text(align="center", baseline="bottom", dy=-5, color="#f8fafc", fontSize=9.5, fontWeight="bold")
-        .encode(
-            x=alt.X("age_group:N", sort=valid_cohorts),
-            xOffset="gender:N",
-            y=alt.Y(f"{metric_col}:Q"),
-            text=alt.Text(f"{metric_col}:Q", format=fmt)
+        text = (
+            alt.Chart(agg)
+            .mark_text(align="center", baseline="bottom", dy=-5, color="#f8fafc", fontSize=9.5, fontWeight="bold")
+            .encode(
+                x=alt.X("age_group:N", sort=valid_cohorts),
+                xOffset="gender:N",
+                y=alt.Y(f"{metric_col}:Q"),
+                text=alt.Text(f"{metric_col}:Q", format=fmt)
+            )
         )
-    )
+        return chart + text
+    else:
+        # Age-only demographic delivery when gender data does not exist
+        clean_demo = filtered[
+            filtered["age_group"].isin(valid_cohorts) &
+            filtered[metric_col].notna() &
+            (filtered[metric_col] > 0)
+        ].copy()
 
-    return chart + text
+        if clean_demo.empty:
+            return alt.Chart(pd.DataFrame({"msg": [f"No demographic delivery records for {county_name} ({dma})"]})).mark_text(color="#94a3b8").encode(text="msg:N")
+
+        agg = (
+            clean_demo.groupby("age_group", as_index=False)[metric_col]
+            .sum()
+        )
+
+        max_val = agg[metric_col].max() if not agg.empty else 1.0
+
+        chart = (
+            alt.Chart(agg)
+            .mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4, color="#0668e1")
+            .encode(
+                x=alt.X(
+                    "age_group:N",
+                    sort=valid_cohorts,
+                    title="Voter Age Cohort (Meta Ad Library)",
+                    axis=alt.Axis(labelAngle=0, labelPadding=6, titlePadding=10)
+                ),
+                y=alt.Y(
+                    f"{metric_col}:Q",
+                    title=y_title,
+                    scale=alt.Scale(domainMax=max_val * 1.20 if max_val > 0 else 100),
+                    axis=alt.Axis(format=fmt, grid=True, titlePadding=10, labelPadding=6)
+                ),
+                tooltip=[
+                    alt.Tooltip("age_group:N", title="Age Cohort"),
+                    alt.Tooltip(f"{metric_col}:Q", title=y_title, format=t_fmt)
+                ]
+            )
+            .properties(
+                title=alt.TitleParams(
+                    text=f"Meta Ad Library Targeted Age Cohorts: {county_name} ({dma})",
+                    subtitle="Empirical ad delivery across voter age groups (Meta API)",
+                    fontSize=14,
+                    subtitleFontSize=11,
+                    subtitleColor="#94a3b8"
+                ),
+                height=280
+            )
+        )
+
+        text = (
+            alt.Chart(agg)
+            .mark_text(align="center", baseline="bottom", dy=-5, color="#f8fafc", fontSize=9.5, fontWeight="bold")
+            .encode(
+                x=alt.X("age_group:N", sort=valid_cohorts),
+                y=alt.Y(f"{metric_col}:Q"),
+                text=alt.Text(f"{metric_col}:Q", format=fmt)
+            )
+        )
+        return chart + text
 
 
 # Alias for backward compatibility
