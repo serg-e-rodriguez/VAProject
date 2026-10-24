@@ -1,0 +1,41 @@
+cpm:
+  meta: [8.0, 14.0, 20.0]
+  youtube: [11.0, 18.0, 25.0]
+  search: [15.0, 24.0, 35.0]
+  display: [4.0, 6.5, 9.0]
+  ctv: [25.0, 35.0, 50.0]
+
+saturation_k: [0.5, 0.8, 1.2]
+persuasion_p: [0.0, 0.002, 0.006]
+turnout_t: [0.0, 0.003, 0.010]
+retention_rho: [0.4, 0.6, 0.8]
+opp_lambda: 0.0
+sigma_state: 3.5
+sigma_unit: 2.5
+env_shift_pts: 0.0
+
+presets:
+  conservative:
+    cpm:
+      meta: [12.0, 18.0, 24.0]
+      youtube: [15.0, 22.0, 30.0]
+      search: [20.0, 30.0, 42.0]
+      display: [5.0, 8.0, 11.0]
+      ctv: [30.0, 42.0, 55.0]
+    saturation_k: [0.4, 0.6, 0.9]
+    persuasion_p: [0.0, 0.001, 0.003]
+    turnout_t: [0.0, 0.0015, 0.005]
+    retention_rho: [0.3, 0.5, 0.7]
+    opp_lambda: 0.5
+  optimistic:
+    cpm:
+      meta: [6.0, 11.0, 16.0]
+      youtube: [9.0, 14.0, 20.0]
+      search: [12.0, 19.0, 28.0]
+      display: [3.0, 5.0, 7.5]
+      ctv: [20.0, 28.0, 40.0]
+    saturation_k: [0.7, 1.0, 1.4]
+    persuasion_p: [0.001, 0.0035, 0.008]
+    turnout_t: [0.001, 0.005, 0.014]
+    retention_rho: [0.5, 0.7, 0.85]
+    opp_lambda: 0.0
