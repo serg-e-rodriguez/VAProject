@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+import urllib.parse as ul
 import numpy as np
 import pandas as pd
 import requests
@@ -205,21 +206,57 @@ def load_meta_ads(max_records: int = 1200) -> tuple[pd.DataFrame, bool]:
         "ad_delivery_date_min": "2024-01-01",
         "fields": (
             "id,ad_creation_time,ad_delivery_start_time,ad_delivery_stop_time,"
-            "page_id,page_name,spend,impressions,demographic_distribution,region_distribution,"
+            "page_id,page_name,spend,impressions,demographic_distribution,delivery_by_region,"
             "ad_creative_bodies,ad_creative_link_titles,ad_snapshot_url,publisher_platforms"
         ),
         "limit": 100
     }
 
+    all_items = []
+    target_count = min(max_records, 600)
+    current_url = META_API_ENDPOINT
+    current_params: dict | None = params
+
     try:
-        response = requests.get(META_API_ENDPOINT, params=params, timeout=12)
-        if response.status_code == 200:
-            data = response.json().get("data", [])
-            if not data:
-                return generate_mock_meta_ads(n=max_records), False
-            
+        while current_url and len(all_items) < target_count:
+            response = requests.get(current_url, params=current_params, timeout=12)
+            current_params = None  # Next pages already encode parameters in paging.next
+
+            if response.status_code == 200:
+                resp_json = response.json()
+                data = resp_json.get("data", [])
+                if not data:
+                    break
+                all_items.extend(data)
+                paging = resp_json.get("paging", {})
+                current_url = paging.get("next")
+            else:
+                try:
+                    err_json = response.json().get("error", {})
+                    err_code = err_json.get("code")
+                    err_subcode = err_json.get("error_subcode")
+                    err_msg = err_json.get("message", response.text[:200])
+                except Exception:
+                    err_code = None
+                    err_subcode = None
+                    err_msg = response.text[:200]
+
+                if err_code in (10, 190) or err_subcode == 2332002 or "permission" in str(err_msg).lower():
+                    logger.warning(
+                        f"Meta Ad Library API authorization error (code {err_code}, subcode {err_subcode}). "
+                        f"Please ensure token has required permissions ({', '.join(META_REQUIRED_PERMISSIONS)}). "
+                        f"Using calibrated NC political ads sample dataset."
+                    )
+                else:
+                    logger.warning(
+                        f"Meta Ad Library API error (HTTP {response.status_code}, code {err_code}): {err_msg}. "
+                        f"Using calibrated NC political ads sample dataset."
+                    )
+                break
+
+        if all_items:
             records = []
-            for item in data:
+            for item in all_items:
                 spend = item.get("spend", {})
                 impressions = item.get("impressions", {})
                 demo_dist = item.get("demographic_distribution", [])
@@ -231,10 +268,20 @@ def load_meta_ads(max_records: int = 1200) -> tuple[pd.DataFrame, bool]:
                 # Deduce format from metadata
                 ad_type = "VIDEO" if "video" in creative_title.lower() or "watch" in creative_body.lower() else "IMAGE"
 
+                # Sanitize snapshot URL to avoid leaking access token
+                raw_snap = item.get("ad_snapshot_url", "")
+                if raw_snap and "access_token=" in raw_snap:
+                    parsed = ul.urlparse(raw_snap)
+                    q = ul.parse_qs(parsed.query)
+                    q.pop("access_token", None)
+                    snap_url = ul.urlunparse(parsed._replace(query=ul.urlencode(q, doseq=True)))
+                else:
+                    snap_url = raw_snap or f"https://www.facebook.com/ads/library/?id={item.get('id')}"
+
                 records.append({
                     "ad_id": str(item.get("id")),
                     "ad_url": f"https://www.facebook.com/ads/library/?id={item.get('id')}",
-                    "ad_snapshot_url": item.get("ad_snapshot_url", f"https://www.facebook.com/ads/library/?id={item.get('id')}"),
+                    "ad_snapshot_url": snap_url,
                     "ad_type": ad_type,
                     "regions": "NC",
                     "advertiser_id": str(item.get("page_id", "Unknown")),
@@ -255,17 +302,8 @@ def load_meta_ads(max_records: int = 1200) -> tuple[pd.DataFrame, bool]:
             df = pd.DataFrame(records)
             return df, True
         else:
-            # Mask error details to ensure no tokens or credentials leak
-            err_msg = response.text[:250]
-            if "OAuthException" in err_msg or response.status_code == 400:
-                logger.warning(
-                    f"Meta Ad Library API requires an authorized Meta User Token with permissions "
-                    f"(ads_management, ads_read, business_management, pages_read_engagement, pages_manage_ads, leads_retrieval) "
-                    f"(HTTP {response.status_code}). Using calibrated NC political ads sample dataset."
-                )
-            else:
-                logger.warning(f"Meta API responded with HTTP {response.status_code}. Using calibrated sample dataset.")
             return generate_mock_meta_ads(n=max_records), False
+
     except Exception as exc:
         logger.warning(f"Network error querying Meta Ad Library API: {exc}. Using calibrated sample dataset.")
         return generate_mock_meta_ads(n=max_records), False
