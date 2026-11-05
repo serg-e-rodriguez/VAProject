@@ -37,6 +37,9 @@ pages = {
     "Plan": [
         st.Page("app_pages/war_room.py", title="War Room", icon=":material/military_tech:"),
     ],
+    "Review": [
+        st.Page("app_pages/backtest.py", title="2026 Backtest", icon=":material/fact_check:"),
+    ],
     "Reference": [
         st.Page("app_pages/methodology.py", title="Methodology & Data Notes", icon=":material/menu_book:"),
         st.Page("app_pages/settings.py", title="Settings", icon=":material/settings:"),

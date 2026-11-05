@@ -22,7 +22,7 @@ def fidelity_badge(fidelity: FidelityType) -> str:
         "observed": "Directly measured empirical data from platform transparency APIs or certified election returns.",
         "aggregated": "Statistically rolled up from precinct records or respondent survey files without modeled extrapolation.",
         "modeled": "Estimated using registered voter shares, demographic weighting, or simulation models.",
-        "sample": "Calibrated demonstration dataset — live transparency API feed unavailable."
+        "sample": "Illustrative only — not real data."
     }
     f_clean = fidelity.lower().strip()
     tip = tooltips.get(f_clean, "Data fidelity status")
@@ -70,20 +70,12 @@ def kpi_card(
     badge_html = fidelity_badge(fidelity)
     band_html = f'<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">{band}</div>' if band else ""
 
-    card_html = f"""
-    <div class="kpi-card">
-        <div class="kpi-header">
-            <span class="kpi-label">{label}</span>
-            {badge_html}
-        </div>
-        <div class="kpi-main">
-            <span class="kpi-value">{value}</span>
-            {delta_html}
-        </div>
-        {band_html}
-    </div>
-    """
-    st.markdown(card_html, unsafe_allow_html=True)
+    # One line on purpose: indented multi-line HTML with an empty slot is parsed as a markdown code block.
+    card_html = (
+        f'<div class="kpi-card"><div class="kpi-header"><span class="kpi-label">{label}</span>{badge_html}</div>'
+        f'<div class="kpi-main"><span class="kpi-value">{value}</span>{delta_html}</div>{band_html}</div>'
+    )
+    st.markdown(card_html.replace("$", "&#36;"), unsafe_allow_html=True)
 
     # Optional mini sparkline below card
     if spark_data and len(spark_data) >= 3:
@@ -101,7 +93,7 @@ def kpi_card(
                 alt.value("#E5E7EB" if theme == "light" else "#262B36")
             )
         ).properties(height=24, width="container")
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
 
 
 def chart_card_header(
@@ -118,17 +110,11 @@ def chart_card_header(
     badge_html = fidelity_badge(fidelity)
     sub_html = f'<div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">{subtitle}</div>' if subtitle else ""
 
-    header_html = f"""
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-        <div>
-            <h4 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary);">{title}</h4>
-            {sub_html}
-        </div>
-        <div>
-            {badge_html}
-        </div>
-    </div>
-    """
+    header_html = (
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">'
+        f'<div><h4 style="margin:0;font-size:16px;font-weight:700;color:var(--text-primary);">{title}</h4>{sub_html}</div>'
+        f'<div style="flex-shrink:0;">{badge_html}</div></div>'
+    )
     st.markdown(header_html, unsafe_allow_html=True)
 
 
@@ -187,5 +173,15 @@ def creative_card(
             st.markdown(f"<div>{theme_pills}</div>", unsafe_allow_html=True)
         with col2:
             st.markdown(f"<div style='text-align: right; font-size: 12px; color: var(--text-secondary);'>Spend: <strong style='color: var(--text-primary);'>{spend_band}</strong></div>", unsafe_allow_html=True)
-            st.markdown(f"<div style='text-align: right; font-size: 11px; color: var(--text-muted); margin-bottom: 8px;'>Demo: {top_demo}</div>", unsafe_allow_html=True)
-            st.link_button(f"Open in {platform} Library", url, use_container_width=True)
+            st.markdown(f"<div style='text-align: right; font-size: 11px; color: var(--text-muted); margin-bottom: 8px;'>Top audience: {top_demo}</div>", unsafe_allow_html=True)
+            st.link_button(f"Open in {platform} Library", url, width="stretch")
+
+
+def insight(title: str, sub: str = "", tone: Literal["accent", "dem", "rep"] = "accent") -> None:
+    """Data-driven callout box (text is computed by the page, never hardcoded numbers)."""
+    import html as _h
+
+    cls = "" if tone == "accent" else f" {tone}"
+    sub_html = f"<span class='sub'>{_h.escape(sub)}</span>" if sub else ""
+    st.markdown(f"<div class='insight{cls}'><b>{_h.escape(title)}</b>{sub_html}</div>".replace("$", "&#36;"),
+                unsafe_allow_html=True)

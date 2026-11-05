@@ -1,5 +1,6 @@
 """
-Geography crosswalk, district mapping, and baseline election results per §5.1, §5.2, and §6.4.
+MEDSL 2022 US Senate county returns (cross-check of the NCSBE baseline) and vote-method splits.
+District-level figures are built from NCSBE precinct files in campaign_intel.ingest.ncsbe.
 """
 
 import numpy as np
@@ -89,95 +90,3 @@ def get_vote_method_splits() -> pd.DataFrame:
     modes = nc.groupby(["mode", "party_clean"], as_index=False)["candidatevotes"].sum()
     modes.rename(columns={"mode": "vote_method", "candidatevotes": "votes"}, inplace=True)
     return modes
-
-
-def get_district_baselines(unit_type: str = "cd") -> pd.DataFrame:
-    """
-    Produces consistent baseline election results for Congressional (14), State Senate (50),
-    or State House (120) districts, calibrated to sum precisely to the statewide total.
-    """
-    county_df = get_county_baselines()
-    if county_df.empty:
-        return pd.DataFrame()
-
-    state_total_votes = county_df["total_votes"].sum()
-
-    num_units = 14 if unit_type == "cd" else (50 if unit_type == "sd" else 120)
-    prefix = unit_type.upper()
-
-    # Calibrated distributions across districts based on actual NC electoral geography
-    # Some districts lean heavily Dem (Charlotte CD12, Triangle CD4), some lean GOP, some are battlegrounds (CD1, CD13)
-    np.random.seed(42 if unit_type == "cd" else (100 if unit_type == "sd" else 200))
-
-    if unit_type == "cd":
-        # Realistic CD baseline leans
-        leans = [
-            +2.8,   # CD1: Competitive / slight Dem lean
-            -18.5,  # CD2: Raleigh Dem (wait, CD2 is Dem, CD3 is GOP)
-            -22.0,  # CD3: Eastern NC GOP
-            +32.0,  # CD4: Durham/Chapel Hill Solid Dem
-            -16.0,  # CD5: NW NC GOP
-            -17.5,  # CD6: Piedmont GOP
-            -15.0,  # CD7: SE NC GOP
-            -24.0,  # CD8: Sandhills GOP
-            -20.0,  # CD9: South Central GOP
-            -22.0,  # CD10: Foothills GOP
-            -19.0,  # CD11: Western NC GOP
-            +36.0,  # CD12: Mecklenburg/Charlotte Solid Dem
-            +1.5,   # CD13: Raleigh suburbs/Johnston Toss-up
-            -18.0   # CD14: West GOP
-        ]
-    elif unit_type == "sd":
-        leans = np.clip(np.random.normal(loc=-4.5, scale=18.0, size=50), -35.0, 42.0)
-    else:
-        leans = np.clip(np.random.normal(loc=-5.0, scale=20.0, size=120), -40.0, 45.0)
-
-    # Weights summing to 1.0
-    raw_sizes = np.random.uniform(0.85, 1.15, size=num_units)
-    shares = raw_sizes / raw_sizes.sum()
-
-    records = []
-    for i in range(1, num_units + 1):
-        uid = f"{prefix}{i}"
-        d_share = shares[i - 1]
-        tot_v = state_total_votes * d_share
-        lean_pct = leans[i - 1]
-
-        # calculate dem and rep shares
-        dem_pct = 0.50 + (lean_pct / 200.0)
-        rep_pct = 1.0 - dem_pct
-
-        dem_v = tot_v * dem_pct * 0.97
-        rep_v = tot_v * rep_pct * 0.97
-        oth_v = tot_v * 0.03
-        margin_v = dem_v - rep_v
-
-        # Electorate universes
-        registered = int(tot_v / 0.52)  # ~52% turnout in 2022
-        persuasion = int(registered * 0.36)  # Unaffiliated / soft
-        mobilization = int(registered * 0.22)  # Low-turnout Dems
-        already_voted = int(tot_v * 0.44)  # Early / One-stop
-
-        records.append({
-            "unit_id": uid,
-            "name": f"{'Congressional' if unit_type == 'cd' else ('State Senate' if unit_type == 'sd' else 'State House')} District {i}",
-            "district_num": i,
-            "unit_type": unit_type,
-            "dem_votes": round(dem_v),
-            "rep_votes": round(rep_v),
-            "other_votes": round(oth_v),
-            "total_votes": round(tot_v),
-            "margin_votes": round(margin_v),
-            "baseline_margin_votes": round(margin_v),
-            "dem_margin_pct": round((margin_v / tot_v) * 100.0, 1),
-            "registered_voters": registered,
-            "turnout_2022": round(tot_v),
-            "persuasion_universe": persuasion,
-            "mobilization_universe": mobilization,
-            "already_voted": already_voted,
-            "opp_share": round(np.clip(rep_pct * np.random.uniform(0.8, 1.15), 0.25, 0.75), 2),
-            "d_u": 0.85
-        })
-
-    df_dist = pd.DataFrame(records)
-    return df_dist

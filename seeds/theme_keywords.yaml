@@ -1,9 +1,27 @@
+# Theme -> keyword list. Matched case-insensitively on WORD BOUNDARIES (so "ICE" does not
+# match "price"). Keywords written in ALL CAPS are matched case-sensitively (acronyms).
+theme_labels:
+  economy: Economy & Cost of Living
+  abortion: Abortion & Reproductive Rights
+  healthcare: Healthcare
+  education: Education
+  immigration: Immigration & Border
+  crime: Crime & Public Safety
+  democracy: Democracy & Elections
+  guns: Guns
+  energy_climate: Energy & Climate
+  veterans: Veterans & Military
+  character_attack: Character / Attack
+  fundraising: Fundraising
+  gotv: GOTV / Voting Info
 theme_keywords:
   economy:
     - "economy"
     - "inflation"
     - "cost of living"
     - "jobs"
+    - "tariffs"
+    - "affordable"
     - "prices"
     - "taxes"
     - "grocery"
@@ -30,6 +48,7 @@ theme_keywords:
     - "prescription drugs"
     - "medicare"
     - "medicaid"
+    - "health insurance"
     - "affordable care act"
     - "obamacare"
     - "insulin"
@@ -53,7 +72,7 @@ theme_keywords:
     - "southern border"
     - "illegal immigration"
     - "asylum"
-    - "ice"
+    - "ICE"
     - "migrants"
     - "border patrol"
     - "fentanyl"
@@ -101,7 +120,8 @@ theme_keywords:
     - "renewables"
   veterans:
     - "veterans"
-    - "va"
+    - "the va"
+    - "v.a."
     - "service members"
     - "military"
     - "military families"

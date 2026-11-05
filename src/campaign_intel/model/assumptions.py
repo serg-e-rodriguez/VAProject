@@ -1,111 +1,108 @@
 """
-War Room Model Assumptions and Presets per §7.4 and §7.9.
+War Room model assumptions and presets (PROJECT_DESIGN.md §7.4, §7.9).
+
+Every uncertain parameter is a (low, mode, high) triangle used by the Monte Carlo.
+CPM modes come from the data snapshot when available (median NC CPM by channel).
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Literal
 
 import yaml
 
-from campaign_intel.config import SEEDS_DIR
+from campaign_intel.config import CHANNELS, SEEDS_DIR
+
+Tri = tuple[float, float, float]
 
 
 @dataclass(frozen=True)
 class Assumptions:
-    cpm: dict[str, tuple[float, float, float]]  # channel -> (low, mode, high)
-    saturation_k: tuple[float, float, float]
-    persuasion_p: tuple[float, float, float]
-    turnout_t: tuple[float, float, float]
-    retention_rho: tuple[float, float, float]
-    opp_lambda: float
-    sigma_state: float
-    sigma_unit: float
-    env_shift_pts: float
+    cpm: dict[str, Tri]          # channel -> (low, mode, high) $ per 1,000 impressions
+    saturation_k: Tri            # reach curve steepness
+    persuasion_p: Tri            # net margin votes per reached persuadable voter
+    turnout_t: Tri               # turnout lift per reached mobilization target
+    retention_rho: Tri           # weekly retention of ad effects
+    opp_lambda: float            # opponent share-of-voice dampening
+    sigma_state: float           # statewide baseline error (pts)
+    sigma_unit: float            # extra per-unit error (pts)
+    env_shift_pts: float         # national environment vs. 2024 baseline (pts, + = Dem)
+    dem_share_mobilized: float = 0.85  # d_u: share of mobilized Dem registrants voting Dem
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        d["cpm"] = {k: list(v) for k, v in self.cpm.items()}
+        return d
+
+    @staticmethod
+    def from_dict(d: dict) -> Assumptions:
+        d = dict(d)
+        d["cpm"] = {k: tuple(v) for k, v in d["cpm"].items()}
+        for k in ["saturation_k", "persuasion_p", "turnout_t", "retention_rho"]:
+            d[k] = tuple(d[k])
+        return Assumptions(**d)
 
 
-def load_defaults(path: Path | None = None) -> Assumptions:
-    yaml_path = path or (SEEDS_DIR / "assumptions_default.yaml")
-    if yaml_path.exists():
-        with open(yaml_path, "r") as f:
-            data = yaml.safe_load(f)
-        cpm_dict = {k: tuple(v) for k, v in data.get("cpm", {}).items()}
-        return Assumptions(
-            cpm=cpm_dict,
-            saturation_k=tuple(data.get("saturation_k", [0.5, 0.8, 1.2])),
-            persuasion_p=tuple(data.get("persuasion_p", [0.0, 0.002, 0.006])),
-            turnout_t=tuple(data.get("turnout_t", [0.0, 0.003, 0.010])),
-            retention_rho=tuple(data.get("retention_rho", [0.4, 0.6, 0.8])),
-            opp_lambda=float(data.get("opp_lambda", 0.0)),
-            sigma_state=float(data.get("sigma_state", 3.5)),
-            sigma_unit=float(data.get("sigma_unit", 2.5)),
-            env_shift_pts=float(data.get("env_shift_pts", 0.0)),
-        )
+def _tri(v) -> Tri:
+    lo, mode, hi = (float(x) for x in v)
+    return (min(lo, mode), mode, max(hi, mode))
 
-    # Hardcoded fallbacks if YAML missing
+
+def _read_yaml(path: Path | None = None) -> dict:
+    p = path or (SEEDS_DIR / "assumptions_default.yaml")
+    with open(p) as f:
+        return yaml.safe_load(f)
+
+
+def observed_cpm() -> dict[str, float]:
+    """Median NC CPM by channel from the snapshot (empty dict if no snapshot)."""
+    try:
+        from campaign_intel.data.snapshot import read_table
+
+        df = read_table("cpm_observed")
+        return {r.channel: float(r.cpm_median) for r in df.itertuples() if r.cpm_median > 0}
+    except Exception:
+        return {}
+
+
+def load_defaults(path: Path | None = None, use_observed_cpm: bool = True) -> Assumptions:
+    data = _read_yaml(path)
+    cpm = {k: _tri(v) for k, v in data["cpm"].items()}
+    if use_observed_cpm:
+        spread = float(data.get("cpm_observed_spread", 0.4))
+        for ch, mode in observed_cpm().items():
+            if ch in cpm:
+                cpm[ch] = (round(mode * (1 - spread), 2), round(mode, 2), round(mode * (1 + spread), 2))
     return Assumptions(
-        cpm={
-            "meta": (8.0, 14.0, 20.0),
-            "youtube": (11.0, 18.0, 25.0),
-            "search": (15.0, 24.0, 35.0),
-            "display": (4.0, 6.5, 9.0),
-            "ctv": (25.0, 35.0, 50.0),
-        },
-        saturation_k=(0.5, 0.8, 1.2),
-        persuasion_p=(0.0, 0.002, 0.006),
-        turnout_t=(0.0, 0.003, 0.010),
-        retention_rho=(0.4, 0.6, 0.8),
-        opp_lambda=0.0,
-        sigma_state=3.5,
-        sigma_unit=2.5,
-        env_shift_pts=0.0,
+        cpm={c: cpm[c] for c in CHANNELS},
+        saturation_k=_tri(data["saturation_k"]),
+        persuasion_p=_tri(data["persuasion_p"]),
+        turnout_t=_tri(data["turnout_t"]),
+        retention_rho=_tri(data["retention_rho"]),
+        opp_lambda=float(data.get("opp_lambda", 0.0)),
+        sigma_state=float(data.get("sigma_state", 3.5)),
+        sigma_unit=float(data.get("sigma_unit", 2.5)),
+        env_shift_pts=float(data.get("env_shift_pts", 0.0)),
+        dem_share_mobilized=float(data.get("dem_share_mobilized", 0.85)),
     )
 
 
-def apply_preset(a: Assumptions, name: Literal["conservative", "optimistic"]) -> Assumptions:
-    """
-    Applies preset configurations from seeds/assumptions_default.yaml.
-    """
-    yaml_path = SEEDS_DIR / "assumptions_default.yaml"
-    if yaml_path.exists():
-        with open(yaml_path, "r") as f:
-            data = yaml.safe_load(f)
-        preset_data = data.get("presets", {}).get(name)
-        if preset_data:
-            cpm_dict = {k: tuple(v) for k, v in preset_data.get("cpm", {}).items()}
-            return Assumptions(
-                cpm=cpm_dict,
-                saturation_k=tuple(preset_data.get("saturation_k", a.saturation_k)),
-                persuasion_p=tuple(preset_data.get("persuasion_p", a.persuasion_p)),
-                turnout_t=tuple(preset_data.get("turnout_t", a.turnout_t)),
-                retention_rho=tuple(preset_data.get("retention_rho", a.retention_rho)),
-                opp_lambda=float(preset_data.get("opp_lambda", a.opp_lambda)),
-                sigma_state=a.sigma_state,
-                sigma_unit=a.sigma_unit,
-                env_shift_pts=a.env_shift_pts,
-            )
-
-    if name == "conservative":
-        return Assumptions(
-            cpm={k: (v[0] * 1.2, v[1] * 1.2, v[2] * 1.2) for k, v in a.cpm.items()},
-            saturation_k=(0.4, 0.6, 0.9),
-            persuasion_p=(0.0, 0.001, 0.003),
-            turnout_t=(0.0, 0.0015, 0.005),
-            retention_rho=(0.3, 0.5, 0.7),
-            opp_lambda=0.5,
-            sigma_state=a.sigma_state,
-            sigma_unit=a.sigma_unit,
-            env_shift_pts=a.env_shift_pts,
-        )
-    else:  # optimistic
-        return Assumptions(
-            cpm={k: (v[0] * 0.8, v[1] * 0.8, v[2] * 0.8) for k, v in a.cpm.items()},
-            saturation_k=(0.7, 1.0, 1.4),
-            persuasion_p=(0.001, 0.0035, 0.008),
-            turnout_t=(0.001, 0.005, 0.014),
-            retention_rho=(0.5, 0.7, 0.85),
-            opp_lambda=0.0,
-            sigma_state=a.sigma_state,
-            sigma_unit=a.sigma_unit,
-            env_shift_pts=a.env_shift_pts,
-        )
+def apply_preset(a: Assumptions, name: Literal["default", "conservative", "optimistic"]) -> Assumptions:
+    """Effect-size / cost presets. Environment, error and d_u are kept from `a`."""
+    base = load_defaults()
+    if name == "default":
+        return replace(base, env_shift_pts=a.env_shift_pts, sigma_state=a.sigma_state,
+                       sigma_unit=a.sigma_unit, dem_share_mobilized=a.dem_share_mobilized)
+    p = _read_yaml()["presets"][name]
+    cpm_mult = float(p.get("cpm_multiplier", 1.0))
+    return replace(
+        a,
+        cpm={c: tuple(round(x * cpm_mult, 2) for x in base.cpm[c]) for c in CHANNELS},
+        saturation_k=_tri(p["saturation_k"]),
+        persuasion_p=_tri(p["persuasion_p"]),
+        turnout_t=_tri(p["turnout_t"]),
+        retention_rho=_tri(p["retention_rho"]),
+        opp_lambda=float(p.get("opp_lambda", a.opp_lambda)),
+    )

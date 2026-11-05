@@ -30,13 +30,16 @@ def get_age_cohort(birthyr: float) -> str:
         return "65+"
 
 
+# CCES 2024 "In the past 24 hours, did you..." (CC24_300_1..4). Labels verified from the skip
+# logic in the file: CC24_300a (TV news type) is asked only if _2, CC24_300c (print/online) only
+# if _3, and CC24_300d (political social-media activity) only if _1.
+# NOTE: CC24_300b_1..8 are national TV *networks* (asked only of national-news viewers), NOT social
+# platforms — an earlier version mislabelled them as Facebook/YouTube/etc.
 PLATFORM_MAP = {
-    "CC24_300b_1": "Facebook",
-    "CC24_300b_2": "YouTube",
-    "CC24_300b_3": "Instagram",
-    "CC24_300b_4": "X (Twitter)",
-    "CC24_300b_5": "TikTok",
-    "CC24_300b_6": "Reddit",
+    "CC24_300_1": "Social media",
+    "CC24_300_2": "TV news",
+    "CC24_300_3": "Newspaper (print/online)",
+    "CC24_300_4": "Radio news / talk",
 }
 
 
@@ -131,8 +134,8 @@ def compute_issue_priorities_by_demo(csv_path: Path | None = None) -> pd.DataFra
 
     age_cohorts = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
     issues = [
-        {"theme": "Economy & Inflation", "col": "CC24_303", "cond": "Increased a lot"},
-        {"theme": "National Economy Worse", "col": "CC24_301", "cond": "Gotten much worse"},
+        {"theme": "Prices rose a lot (past year)", "col": "CC24_303", "cond": "Increased a lot"},
+        {"theme": "National economy much worse", "col": "CC24_301", "cond": "Gotten much worse"},
     ]
 
     records = []

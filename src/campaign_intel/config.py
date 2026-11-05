@@ -23,7 +23,6 @@ GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "virtualanalytics5122")
 GCP_KEY_PATH = os.getenv("GCP_KEY_PATH") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 META_USER_TOKEN = os.getenv("META_USER_TOKEN", "")
 META_AD_TOKEN = os.getenv("META_AD_TOKEN", "")
-DATA_MODE = os.getenv("DATA_MODE", "live").lower().strip()  # "live" or "snapshot"
 
 # BigQuery Dataset Constants
 BIGQUERY_POLITICAL_ADS_DATASET = "bigquery-public-data.google_political_ads"
@@ -42,7 +41,12 @@ CHANNELS = ["meta", "youtube", "search", "display", "ctv"]
 AUDIENCES = ["persuasion", "mobilization"]
 DISTRICT_TYPES = ["cd", "sd", "hd"]
 GEO_MODES = ["district", "county"]
-SCOPES = ["statewide", "district"]
+SCOPES = ["statewide", "district", "chamber"]
+SCOPE_LABELS = {
+    "statewide": "Statewide (US Senate)",
+    "district": "Single district race",
+    "chamber": "Chamber majority",
+}
 
 # Channel display metadata
 CHANNEL_LABELS = {
@@ -50,7 +54,7 @@ CHANNEL_LABELS = {
     "youtube": "YouTube (Video)",
     "search": "Google Search",
     "display": "Google Display",
-    "ctv": "Connected TV (CTV)"
+    "ctv": "Connected TV (CTV)",
 }
 
 AUDIENCE_LABELS = {

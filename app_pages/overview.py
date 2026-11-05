@@ -1,169 +1,109 @@
 """
-Overview Page Layout per UI_Design.md §6.1.
-Answers: Where is the money going, and where are we out-spent relative to how close the race is?
+Overview (UI_Design.md §6.1): where is the money going, and where are we out-spent relative
+to how close the race is?
 """
 
 import streamlit as st
 
 from campaign_intel.data.loaders import (
-    load_geo_baselines,
+    fmt_money,
+    load_advertisers,
     load_overview_kpis,
     load_platform_mix,
-    load_weekly_spend_pacing,
+    load_statewide,
+    load_units,
+    load_weekly_by_side,
 )
-from campaign_intel.ui.components import chart_card_header, kpi_card
+from campaign_intel.ui.components import chart_card_header, insight, kpi_card
 from campaign_intel.ui.topbar import render_topbar
-from campaign_intel.viz.charts import area_with_band, donut
+from campaign_intel.viz.charts import area_with_band, ranked_bar, side_scale
 from campaign_intel.viz.maps import choropleth
 
-# 1. Top Bar
 render_topbar("Campaign Overview & Ad Landscape")
-
 theme = st.session_state.get("theme", "dark")
-unit_type = st.session_state.get("unit_type", "cd")
-geo_mode = st.session_state.get("geo_mode", "district")
+unit_type, geo_mode = st.session_state.get("unit_type", "cd"), st.session_state.get("geo_mode", "district")
+geo_key = "county" if geo_mode == "county" else unit_type
 
-# 2. KPI Row
-kpis = load_overview_kpis()
+k = load_overview_kpis()
+sw = load_statewide()
+
 c1, c2, c3, c4 = st.columns(4, gap="medium")
-
 with c1:
-    kpi_card(
-        label="Total NC Ad Spend",
-        value=kpis["total_spend_mid"],
-        delta=kpis["total_spend_delta"],
-        good_direction="neutral",
-        fidelity="aggregated",
-        band=kpis["total_spend_band"],
-        spark_data=[12, 14, 15, 17, 18.4]
-    )
-
+    kpi_card("NC political ad spend since Jul 1", fmt_money(k["total_mid"]), fidelity="modeled",
+             band=f"Range {fmt_money(k['total_low'])} – {fmt_money(k['total_high'])} · Google + Meta, NC share",
+             spark_data=k["weekly_total"])
 with c2:
-    kpi_card(
-        label="Our Share of Voice",
-        value=kpis["our_sov"],
-        delta=kpis["our_sov_delta"],
-        good_direction="up",
-        fidelity="aggregated",
-        band="Dem vs Rep + Allies",
-        spark_data=[39, 41, 42, 43, 44.2]
-    )
-
+    d = (k["dem_sov_4w"] - k["dem_sov_prev4w"]) * 100
+    kpi_card("Dem share of voice (4 wks)", f"{k['dem_sov_4w']:.1%}", delta=f"{d:+.1f} pts vs prior 4 wks",
+             good_direction="up", fidelity="modeled", band="Share of partisan NC spend (classified advertisers)",
+             spark_data=k["sov_series"])
 with c3:
-    kpi_card(
-        label="Opponent Spend (7d)",
-        value=kpis["opp_spend_7d"],
-        delta=kpis["opp_spend_7d_delta"],
-        good_direction="down",  # Opponent spend up is bad for us
-        fidelity="modeled",
-        band="Meta + Google Est.",
-        spark_data=[520, 540, 590, 610, 620]
-    )
-
+    g, gp = k["gop_last_week"], k["gop_prev_week"]
+    chg = (g / gp - 1) * 100 if gp else 0
+    kpi_card("GOP-side spend, last full week", fmt_money(g), delta=f"{chg:+.0f}% w/w", good_direction="down",
+             fidelity="modeled", band=f"Week of {k['last_week']}", spark_data=k["gop_series"])
 with c4:
-    kpi_card(
-        label="Active Ads (Us vs Them)",
-        value=kpis["active_ads_count"],
-        delta=kpis["active_ads_delta"],
-        good_direction="up",
-        fidelity="observed",
-        band="Live Snapshot Archives",
-        spark_data=[1250, 1310, 1380, 1420]
-    )
+    kpi_card("Ads active, last 7 days (Dem vs GOP)", f"{k['active_dem']:,} vs {k['active_gop']:,}",
+             delta=f"+{k['new_dem_7d']:,} new Dem / +{k['new_gop_7d']:,} GOP", good_direction="neutral",
+             fidelity="observed", band="Meta Ad Library + Google Transparency Report")
 
 st.write("")
-
-# 3. Hero Card: Map & Battleground Focus
 with st.container(border=True):
-    col_head, col_ctrl = st.columns([8, 4])
-    with col_head:
-        chart_card_header(
-            title="Electoral Landscape & Ad Pressure",
-            subtitle=f"Showing {'100 NC Counties' if geo_mode == 'county' else f'NC {unit_type.upper()} Districts'} · MEDSL Baseline & Platform Delivery",
-            fidelity="modeled"
-        )
-    with col_ctrl:
-        map_metric = st.segmented_control(
-            "Map Metric",
-            options=["Baseline Margin", "Ad Pressure"],
-            default="Baseline Margin",
-            key="overview_map_metric"
-        )
+    h, ctrl = st.columns([7, 5])
+    with h:
+        chart_card_header("Electoral landscape", f"{'100 NC counties' if geo_mode == 'county' else geo_key.upper() + ' districts'} · "
+                          "2024 presidential margin from NCSBE precinct results (purple outline = within 5 pts)",
+                          fidelity="aggregated")
+    opts = ["2024 margin", "Expected midterm turnout"] + (["Google spend (2026 map)"] if geo_key == "cd" else [])
+    metric = ctrl.segmented_control("Map metric", opts, default=opts[0], key="ov_metric") or opts[0]
+    units = load_units(unit_type, geo_mode)
+    col = {"2024 margin": "dem_margin_pct", "Expected midterm turnout": "expected_turnout",
+           "Google spend (2026 map)": "google_spend_2026_map"}[metric]
+    m_col, l_col = st.columns([8, 4], gap="medium")
+    with m_col:
+        ch = choropleth(geo_key, units, col, metric, scale="diverging" if col == "dem_margin_pct" else "sequential",
+                        theme=theme, fmt="+.1f" if col == "dem_margin_pct" else ",.0f",
+                        extra_tooltips=[("dem_margin_pct", "2024 Dem margin", "+.1f"),
+                                        ("registered_voters", "Registered", ",.0f")], selectable=False)
+        st.altair_chart(ch, width="stretch")
+        if col == "google_spend_2026_map":
+            st.caption("Google's own district-level spend (geo_spend) for the 2026 congressional map — Observed, lifetime of that map.")
+    with l_col:
+        st.markdown("##### 🎯 Closest units")
+        st.caption("Smallest 2024 presidential margins — where small shifts decide seats")
+        close = units.assign(abs_m=units["dem_margin_pct"].abs()).nsmallest(8, "abs_m")
+        st.dataframe(close[["name", "dem_margin_pct", "expected_turnout"]], hide_index=True, width="stretch",
+                     column_config={"name": "Unit", "dem_margin_pct": st.column_config.NumberColumn("Margin", format="%+.1f"),
+                                    "expected_turnout": st.column_config.NumberColumn("Exp. turnout", format="%d")})
+        state_m = (sw["pres24_dem"] - sw["pres24_rep"]) / sw["pres24_total"] * 100
+        insight(f"Statewide 2024 baseline: Dem {state_m:+.1f} pts",
+                f"Harris {sw['pres24_dem']:,} vs Trump {sw['pres24_rep']:,} (NCSBE certified). "
+                f"Expected midterm turnout {sw['voted22_total']:,} (2022 ballots cast).", tone="rep" if state_m < 0 else "dem")
 
-    df_geo = load_geo_baselines(unit_type=unit_type, geo_mode=geo_mode)
+s1, s2 = st.columns([7, 5], gap="medium")
+with s1, st.container(border=True):
+    chart_card_header("Weekly NC spend by side", "Each ad's NC spend spread across its delivery days · band = low–high "
+                      "of the reported spend ranges", fidelity="modeled")
+    w = load_weekly_by_side()
+    w = w[w["side_group"].isin(["Dem side", "GOP side", "Unclassified"])]
+    st.altair_chart(area_with_band(w, "week_start", "nc_spend_mid", "nc_spend_low", "nc_spend_high", "side_group",
+                                   theme=theme), width="stretch")
+    st.caption("Unclassified = advertisers not yet mapped to a side in seeds/advertiser_sides.csv.")
+with s2, st.container(border=True):
+    chart_card_header("Spend by platform", "NC-apportioned spend this cycle, with low–high range", fidelity="modeled")
+    mix = load_platform_mix()
+    st.altair_chart(ranked_bar(mix, "platform", "nc_spend_mid", theme, title="NC spend", low_col="nc_spend_low",
+                               high_col="nc_spend_high", height=180), width="stretch")
+    st.caption("Google: creatives since Jul 2025 targeting NC (multi-state ads apportioned 1/n states). "
+               "Meta: ads delivered in NC since Jul 2026 × NC delivery share.")
 
-    map_col, list_col = st.columns([8, 4], gap="medium")
-    with map_col:
-        is_diverging = (map_metric == "Baseline Margin")
-        metric_col = "dem_margin_pct" if is_diverging else "total_votes"
-        metric_label = "Dem Margin (%)" if is_diverging else "Ad Reach Units"
-
-        map_chart = choropleth(
-            unit_type=unit_type if geo_mode == "district" else "county",
-            df_metrics=df_geo,
-            metric_col=metric_col,
-            metric_label=metric_label,
-            is_diverging=is_diverging,
-            theme=theme
-        )
-        st.altair_chart(map_chart, use_container_width=True)
-
-    with list_col:
-        st.markdown("##### 🎯 Top Battleground Units")
-        st.caption("Units within ±5% margin — highest strategic leverage")
-        if not df_geo.empty and "dem_margin_pct" in df_geo.columns:
-            swing_df = df_geo.copy()
-            swing_df["abs_margin"] = swing_df["dem_margin_pct"].abs()
-            top_battlegrounds = swing_df.sort_values("abs_margin").head(5)
-            disp_table = top_battlegrounds[["unit_id", "name", "dem_margin_pct", "total_votes"]].rename(columns={
-                "unit_id": "Unit",
-                "name": "Name",
-                "dem_margin_pct": "Margin %",
-                "total_votes": "Turnout"
-            })
-            st.dataframe(
-                disp_table,
-                column_config={
-                    "Margin %": st.column_config.NumberColumn(format="%+.1f%%"),
-                    "Turnout": st.column_config.NumberColumn(format="%,d"),
-                },
-                use_container_width=True,
-                hide_index=True
-            )
-
-# 4. Supporting Cards Row (Spend Pacing & Platform Mix)
-col_spend, col_mix = st.columns([7, 5], gap="medium")
-
-with col_spend:
-    with st.container(border=True):
-        chart_card_header(
-            title="Weekly Spend Pacing (Us vs. Opponent)",
-            subtitle="Google Political Ads + Meta Ad Library · Monotone curve with low/high uncertainty band",
-            fidelity="modeled"
-        )
-        df_pacing = load_weekly_spend_pacing()
-        pacing_chart = area_with_band(
-            df=df_pacing,
-            x_col="week_start",
-            mid_col="spend_mid",
-            low_col="spend_low",
-            high_col="spend_high",
-            series_col="side",
-            theme=theme
-        )
-        st.altair_chart(pacing_chart, use_container_width=True)
-
-with col_mix, st.container(border=True):
-    chart_card_header(
-        title="Total Market Platform Mix",
-        subtitle="Ad spend share across primary channels",
-        fidelity="aggregated"
-    )
-    df_mix = load_platform_mix()
-    donut_chart = donut(
-        df=df_mix,
-        category_col="platform",
-        value_col="spend",
-        theme=theme
-    )
-    st.altair_chart(donut_chart, use_container_width=True)
+with st.container(border=True):
+    chart_card_header("Top advertisers in NC", "Ranked by modeled NC spend · colour = side", fidelity="modeled")
+    adv = load_advertisers()
+    st.altair_chart(ranked_bar(adv.head(15), "advertiser", "nc_spend_mid", theme, title="NC spend (mid)",
+                               low_col="nc_spend_low", high_col="nc_spend_high", color_col="side_group",
+                               color_scale=side_scale(theme)), width="stretch")
+    with st.expander("Table view"):
+        st.dataframe(adv.head(50)[["advertiser", "side_group", "platforms", "n_ads", "nc_spend_mid", "top_theme"]],
+                     hide_index=True, width="stretch",
+                     column_config={"nc_spend_mid": st.column_config.NumberColumn("NC spend (mid)", format="dollar")})

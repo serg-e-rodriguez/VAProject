@@ -1,24 +1,38 @@
-platform,advertiser_or_page_id,name,side,scope,unit_id,notes
-Meta,1001,NC Democratic Party (NCDP),us,statewide,NC,Official state party
-Google,AR1001,NC Democratic Party,us,statewide,NC,Official state party committee
-Meta,1002,NC House Democratic Caucus,us,statewide,NC,State legislative campaign committee
-Google,AR1002,NC House Democratic Caucus,us,statewide,NC,State legislative campaign committee
-Meta,1003,NC Senate Democratic Caucus,us,statewide,NC,Senate caucus committee
-Google,AR1003,NC Senate Democratic Caucus,us,statewide,NC,Senate caucus committee
-Meta,1004,Forward NC PAC,ally_us,statewide,NC,Democratic independent expenditure PAC
-Google,AR1004,Forward NC PAC,ally_us,statewide,NC,Democratic independent expenditure PAC
-Meta,1005,Carolina Victory Fund,us,statewide,NC,Democratic joint fundraising committee
-Google,AR1005,Carolina Victory Fund,us,statewide,NC,Democratic joint fundraising committee
-Meta,2001,NC Republican Party (NCGOP),opponent,statewide,NC,Official state GOP party
-Google,AR2001,NC Republican Party,opponent,statewide,NC,Official state GOP party
-Meta,2002,NC House Republican Majority,opponent,statewide,NC,State GOP legislative committee
-Google,AR2002,NC House Republican Majority,opponent,statewide,NC,State GOP legislative committee
-Meta,2003,NC Senate Republican Caucus,opponent,statewide,NC,Senate GOP caucus committee
-Google,AR2003,NC Senate Republican Caucus,opponent,statewide,NC,Senate GOP caucus committee
-Meta,2004,Carolina Future PAC,ally_opp,statewide,NC,Republican independent expenditure PAC
-Google,AR2004,Carolina Future PAC,ally_opp,statewide,NC,Republican independent expenditure PAC
-Meta,2005,Liberty NC Alliance,ally_opp,statewide,NC,Conservative issue advocacy group
-Google,AR2005,Liberty NC Alliance,ally_opp,statewide,NC,Conservative issue advocacy group
-Meta,3001,League of Women Voters of NC,neutral,statewide,NC,Nonpartisan voter education
-Google,AR3001,Democracy NC,neutral,statewide,NC,Nonpartisan civic engagement
-Meta,3002,You Can Vote NC,neutral,statewide,NC,Nonpartisan voting rights
+pattern,side,label,basis
+# Regex (case-insensitive) matched against Google advertiser name, Meta page name and Meta byline.
+# First match wins, top to bottom. Sides: us | ally_us | opponent | ally_opp | neutral.
+# "us" = Democratic US Senate nominee's campaign (Roy Cooper, 2026); "opponent" = Republican nominee (Michael Whatley).
+# Anything unmatched is shown as "unclassified" — review data/cache/advertisers_unclassified.parquet and add rows here.
+\bcooper (for north carolina|victory fund)\b|^roy cooper$,us,Cooper campaign,Candidate committee / JFC
+\bwhatley (for senate|victory committee)\b|^michael whatley$,opponent,Whatley campaign,Candidate committee / JFC
+\bwinsenate\b,ally_us,WinSenate,Democratic Senate super PAC
+\bmajority forward\b,ally_us,Majority Forward,Senate Majority PAC affiliate (Dem)
+^hmp$|house majority (pac|forward),ally_us,House Majority PAC / Forward,Democratic House super PAC
+^dccc$|^dscc$,ally_us,DCCC / DSCC,Democratic party committee
+\bdemocrat(ic|s)\b,ally_us,Democratic party committees,Party name
+lcv victory fund|league of conservation voters,ally_us,LCV,Endorses Democrats
+^ab pac$|^ab foundation$|american bridge,ally_us,American Bridge,Democratic research / super PAC
+dmfi pac,ally_us,DMFI PAC,Democratic Majority for Israel
+nrdc action,ally_us,NRDC Action,Endorses Democrats
+edf action votes,ally_us,EDF Action Votes,Endorses Democrats
+justice democrats,ally_us,Justice Democrats,Progressive PAC
+planned parenthood votes,ally_us,Planned Parenthood Votes,Endorses Democrats
+progress (nc|north carolina) action,ally_us,Progress NC Action,Progressive advocacy
+care in action,ally_us,Care in Action,Progressive advocacy
+\bdon davis\b,ally_us,Don Davis (D),Democratic candidate (CD-1)
+earls for justice,ally_us,Anita Earls (D),Democratic candidate (NC Supreme Court)
+^slf pac$|senate leadership fund,ally_opp,Senate Leadership Fund,Republican Senate super PAC
+^clf$|congressional leadership fund,ally_opp,Congressional Leadership Fund,Republican House super PAC
+^nrcc$|^nrsc$|& nrcc,ally_opp,NRCC / NRSC,Republican party committee
+maga inc,ally_opp,MAGA Inc.,Pro-Trump super PAC
+americans for prosperity,ally_opp,Americans for Prosperity,Conservative advocacy (endorses Republicans)
+\brepublican\b|\bgop\b|^gopac,ally_opp,Republican party committees,Party name
+laurie buckhout,ally_opp,Laurie Buckhout (R),Republican candidate (CD-1)
+virginia foxx,ally_opp,Virginia Foxx (R),Republican incumbent
+friends of tim moore|^tim moore$,ally_opp,Tim Moore (R),Republican incumbent
+phil berger,ally_opp,Phil Berger (R),Republican state senate leader
+greg murphy,ally_opp,Greg Murphy (R),Republican incumbent
+restoration of america,ally_opp,Restoration of America PAC,Conservative PAC
+american action network,ally_opp,American Action Network,Republican-aligned 501(c)(4)
+american civil liberties union|\baclu\b,neutral,ACLU,Nonpartisan
+virginians for fair maps,neutral,Virginians for Fair Maps,Out-of-state ballot measure

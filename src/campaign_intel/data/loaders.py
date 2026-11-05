@@ -1,152 +1,154 @@
 """
-Cached data loaders for all application pages per §4.1.
-Decorated with @st.cache_data(ttl=600) to ensure instant page navigation.
+Cached loaders for the Streamlit pages (PROJECT_DESIGN.md §4.1). Everything comes from the
+local snapshot (data/cache), which is real data frozen at build time — no sample fallbacks.
+Pages call these and lay out the UI; the maths lives in campaign_intel.processing / .model.
 """
 
-import logging
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import requests
 import streamlit as st
 
-logger = logging.getLogger(__name__)
-
-from campaign_intel.config import META_AD_TOKEN
-from campaign_intel.processing.crosswalk import (
-    get_county_baselines,
-    get_district_baselines,
-    get_vote_method_splits,
-)
+from campaign_intel.data.snapshot import has_table, manifest, read_table
+from campaign_intel.processing.crosswalk import get_vote_method_splits
 from campaign_intel.processing.survey import (
     compute_issue_priorities_by_demo,
     compute_platform_use_by_age,
 )
-from campaign_intel.processing.themes import classify_text
+from campaign_intel.processing.themes import theme_labels
+
+CYCLE_START = pd.Timestamp("2026-07-01")
 
 
 @st.cache_data(ttl=600)
-def load_geo_baselines(unit_type: str = "cd", geo_mode: str = "district") -> pd.DataFrame:
-    """
-    Returns baseline margin and electorate figures by district or county.
-    """
-    if geo_mode == "county":
-        df = get_county_baselines()
-        # Add universe figures for county
-        df["registered_voters"] = (df["total_votes"] / 0.52).round().astype(int)
-        df["persuasion_universe"] = (df["registered_voters"] * 0.36).round().astype(int)
-        df["mobilization_universe"] = (df["registered_voters"] * 0.22).round().astype(int)
-        df["already_voted"] = (df["total_votes"] * 0.44).round().astype(int)
-        df["opp_share"] = 0.50
-        df["d_u"] = 0.85
-        return df
-    return get_district_baselines(unit_type)
+def load_manifest() -> dict:
+    return manifest()
+
+
+def snapshot_ready() -> bool:
+    return has_table("units_cd") and has_table("ads_unified")
+
+
+@st.cache_data(ttl=600)
+def dem_share_of_voice() -> float:
+    m = manifest().get("dem_share_of_voice")
+    return float(m) if m is not None else 0.5
+
+
+@st.cache_data(ttl=600)
+def load_units(unit_type: str = "cd", geo_mode: str = "district") -> pd.DataFrame:
+    """Baseline + electorate table for the active geography (one row per unit)."""
+    key = "county" if geo_mode == "county" else unit_type
+    u = read_table(f"units_{key}")
+    # Opponent share of voice: observed statewide GOP share of partisan NC ad spend (Meta+Google).
+    # Ad libraries don't report spend by district, so every unit gets the statewide value.
+    u["opp_share"] = 1.0 - dem_share_of_voice()
+    u["swing_pts"] = u.get("actual26_margin_pct", np.nan) - u["dem_margin_pct"]
+    if key == "cd" and has_table("google_cd_spend_units"):
+        g = read_table("google_cd_spend_units")
+        g = g[g["map_vintage"] == "2026"].groupby("unit_id")["spend_usd"].sum()
+        u["google_spend_2026_map"] = u["unit_id"].map(g).fillna(0.0)
+    return u
+
+
+@st.cache_data(ttl=600)
+def load_ads() -> pd.DataFrame:
+    return read_table("ads_unified")
+
+
+@st.cache_data(ttl=600)
+def load_weekly_by_side(platform: str | None = None) -> pd.DataFrame:
+    w = read_table("weekly_spend_by_side")
+    if platform:
+        w = w[w["platform"] == platform]
+    w = w.groupby(["week_start", "side_group"], as_index=False)[["nc_spend_low", "nc_spend_mid", "nc_spend_high"]].sum()
+    snap = pd.Timestamp(manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
+    # Drop the trailing partial week (it would look like a collapse in spending)
+    last_full = (snap - pd.Timedelta(days=6)).to_period("W-SAT").start_time
+    return w[(w["week_start"] >= CYCLE_START - pd.Timedelta(days=28)) & (w["week_start"] <= last_full)]
+
+
+@st.cache_data(ttl=600)
+def load_sov_weekly() -> pd.DataFrame:
+    w = load_weekly_by_side()
+    p = w.pivot_table(index="week_start", columns="side_group", values="nc_spend_mid", aggfunc="sum").fillna(0)
+    p = p.rename(columns={"Dem side": "dem", "GOP side": "gop"})
+    for c in ["dem", "gop"]:
+        if c not in p.columns:
+            p[c] = 0.0
+    p["dem_share"] = p["dem"] / (p["dem"] + p["gop"]).replace(0, np.nan)
+    return p.reset_index()
 
 
 @st.cache_data(ttl=600)
 def load_overview_kpis() -> dict:
-    """
-    Computes overview KPIs: Total NC Spend, Share of Voice, Opponent Spend 7d, Active Ads us vs. them.
-    """
+    ads = load_ads()
+    w = load_weekly_by_side()
+    snap = pd.Timestamp(manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
+    cyc = w[w["week_start"] >= CYCLE_START]
+    tot = cyc[["nc_spend_low", "nc_spend_mid", "nc_spend_high"]].sum()
+    sov = load_sov_weekly()
+    last4, prev4 = sov.tail(4), sov.iloc[-8:-4]
+    dem4 = last4["dem"].sum() / max(1.0, (last4["dem"] + last4["gop"]).sum())
+    demp = prev4["dem"].sum() / max(1.0, (prev4["dem"] + prev4["gop"]).sum())
+    gop = sov["gop"].tolist()
+    d7, d14 = snap - pd.Timedelta(days=7), snap - pd.Timedelta(days=14)
+    active = ads[ads["end"] >= d7]
+    act = active.groupby("side_group")["ad_id"].nunique()
+    new_dem = ads[(ads["start"] >= d7) & (ads["side_group"] == "Dem side")]["ad_id"].nunique()
+    new_gop = ads[(ads["start"] >= d7) & (ads["side_group"] == "GOP side")]["ad_id"].nunique()
+    new_gop_prev = ads[(ads["start"] >= d14) & (ads["start"] < d7) & (ads["side_group"] == "GOP side")]["ad_id"].nunique()
     return {
-        "total_spend_mid": "$18.4M",
-        "total_spend_band": "Range $14.2M – $22.6M",
-        "total_spend_delta": "+12.4%",
-        "our_sov": "44.2%",
-        "our_sov_delta": "+2.8%",
-        "opp_spend_7d": "$620k",
-        "opp_spend_7d_delta": "+8.5%",  # Up is bad for us
-        "active_ads_count": "1,420 vs 1,890",
-        "active_ads_delta": "+45 new us",
+        "total_mid": float(tot["nc_spend_mid"]), "total_low": float(tot["nc_spend_low"]),
+        "total_high": float(tot["nc_spend_high"]),
+        "weekly_total": (w.groupby("week_start")["nc_spend_mid"].sum().tail(8)).tolist(),
+        "dem_sov_4w": dem4, "dem_sov_prev4w": demp, "sov_series": sov["dem_share"].fillna(0.5).tail(8).tolist(),
+        "gop_last_week": float(gop[-1]) if gop else 0.0, "gop_prev_week": float(gop[-2]) if len(gop) > 1 else 0.0,
+        "gop_series": gop[-8:],
+        "active_dem": int(act.get("Dem side", 0)), "active_gop": int(act.get("GOP side", 0)),
+        "new_dem_7d": int(new_dem), "new_gop_7d": int(new_gop), "new_gop_prev_7d": int(new_gop_prev),
+        "last_week": str(sov["week_start"].max().date()) if len(sov) else "",
     }
 
 
 @st.cache_data(ttl=600)
-def load_weekly_spend_pacing() -> pd.DataFrame:
-    """
-    Returns weekly spend time series for Us and Opponent with low/mid/high range bands.
-    """
-    weeks = pd.date_range("2026-08-15", periods=10, freq="W-MON")
-    records = []
-    for i, w in enumerate(weeks):
-        # Us spend trend
-        base_us = 180_000 * (1.0 + (i / 10.0) ** 1.8 * 1.5)
-        records.append({
-            "week_start": w.strftime("%Y-%m-%d"),
-            "side": "Our Campaign (Dem)",
-            "spend_mid": round(base_us),
-            "spend_low": round(base_us * 0.82),
-            "spend_high": round(base_us * 1.18),
-        })
-        # Opponent spend trend
-        base_opp = 210_000 * (1.0 + (i / 10.0) ** 1.6 * 1.4)
-        records.append({
-            "week_start": w.strftime("%Y-%m-%d"),
-            "side": "Opponent (Rep)",
-            "spend_mid": round(base_opp),
-            "spend_low": round(base_opp * 0.80),
-            "spend_high": round(base_opp * 1.22),
-        })
-    return pd.DataFrame(records)
-
-
-@st.cache_data(ttl=600)
 def load_platform_mix() -> pd.DataFrame:
-    """
-    Returns market spend distribution by advertising platform.
-    """
-    return pd.DataFrame([
-        {"platform": "Meta (FB / IG)", "spend": 8_450_000},
-        {"platform": "YouTube (Video)", "spend": 5_220_000},
-        {"platform": "Google Search", "spend": 2_890_000},
-        {"platform": "Connected TV (CTV)", "spend": 1_840_000},
-    ])
+    return read_table("platform_mix")
 
 
 @st.cache_data(ttl=600)
-def load_theme_demographic_heatmap(view_type: str = "Us") -> pd.DataFrame:
-    """
-    Returns theme x age demographic matrix for Us, Opponent, or Gap.
-    """
-    themes = [
-        "Economy & Cost of Living",
-        "Abortion & Reproductive Rights",
-        "Healthcare & Rx Costs",
-        "Public Safety & Crime",
-        "Immigration & Border",
-        "Democracy & Voting Rights",
-        "Education & Schools",
-    ]
-    age_groups = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
+def load_advertisers() -> pd.DataFrame:
+    return read_table("advertisers")
 
-    np.random.seed(42)
-    records = []
-    for th in themes:
-        for age in age_groups:
-            # Calibrated baseline delivery
-            if th == "Economy & Cost of Living":
-                us_val = 32.0 if age in ["35-44", "45-54"] else 22.0
-                opp_val = 48.0 if age in ["45-54", "55-64"] else 38.0
-            elif th == "Abortion & Reproductive Rights":
-                us_val = 45.0 if age in ["18-24", "25-34", "35-44"] else 25.0
-                opp_val = 12.0
-            elif th == "Public Safety & Crime":
-                us_val = 14.0
-                opp_val = 35.0 if age in ["55-64", "65+"] else 22.0
-            elif th == "Healthcare & Rx Costs":
-                us_val = 38.0 if age in ["55-64", "65+"] else 24.0
-                opp_val = 15.0
-            else:
-                us_val = float(np.random.uniform(10, 28))
-                opp_val = float(np.random.uniform(10, 28))
 
-            val = us_val if view_type == "Us" else (opp_val if view_type == "Opponent" else (us_val - opp_val))
-            records.append({
-                "theme": th,
-                "age_cohort": age,
-                "pct": round(val, 1)
-            })
-    return pd.DataFrame(records)
+@st.cache_data(ttl=600)
+def load_alerts() -> pd.DataFrame:
+    return read_table("alerts") if has_table("alerts") else pd.DataFrame(columns=["severity", "type", "advertiser", "text", "date", "alert_id"])
+
+
+@st.cache_data(ttl=600)
+def load_theme_by_age(view: str = "Us") -> pd.DataFrame:
+    """Share of each age group's Meta NC impressions carrying each theme. view: Us | Opponent | Gap."""
+    t = read_table("theme_by_age")
+    labels = theme_labels()
+    t["theme"] = t["theme"].map(lambda x: labels.get(x, x))
+    p = t.pivot_table(index=["theme", "age"], columns="side_group", values="pct", aggfunc="sum").fillna(0.0)
+    for c in ["Dem side", "GOP side"]:
+        if c not in p.columns:
+            p[c] = 0.0
+    if view == "Us":
+        p["pct"] = p["Dem side"]
+    elif view == "Opponent":
+        p["pct"] = p["GOP side"]
+    else:
+        p["pct"] = p["Dem side"] - p["GOP side"]
+    return p.reset_index()[["theme", "age", "pct", "Dem side", "GOP side"]].rename(columns={"age": "age_cohort"})
+
+
+@st.cache_data(ttl=600)
+def load_delivery_by_demo() -> pd.DataFrame:
+    return read_table("delivery_by_demo")
 
 
 @st.cache_data(ttl=600)
@@ -165,116 +167,36 @@ def load_vote_methods() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600)
-def load_opponent_creatives() -> list[dict]:
-    """
-    Returns inspectable opponent ad creatives for Opponent Tracker.
-    Queries the live Meta Ad Library API when META_AD_TOKEN is present,
-    falling back to calibrated fixtures per §4.1 and §6.4.
-    """
-    live_creatives = []
-    if META_AD_TOKEN:
-        try:
-            url = "https://graph.facebook.com/v21.0/ads_archive"
-            params = {
-                "access_token": META_AD_TOKEN,
-                "ad_reached_countries": "US",
-                "search_terms": "North Carolina",
-                "ad_type": "POLITICAL_AND_ISSUE_ADS",
-                "limit": 10,
-                "fields": "id,page_name,ad_creation_time,spend,impressions,ad_creative_bodies,ad_snapshot_url,demographic_distribution",
-            }
-            res = requests.get(url, params=params, timeout=5)
-            if res.status_code == 200:
-                data = res.json().get("data", [])
-                for ad in data:
-                    bodies = ad.get("ad_creative_bodies") or [""]
-                    body = bodies[0] if bodies else ""
-                    if not body.strip():
-                        continue
-                    spend = ad.get("spend") or {}
-                    low = int(spend.get("lower_bound") or 0)
-                    high = int(spend.get("upper_bound") or 0)
-                    spend_str = f"${low:,} – ${high:,}" if high else f"≥ ${low:,}"
-                    snap_url = ad.get("ad_snapshot_url", "")
-                    if "access_token=" in snap_url:
-                        snap_url = snap_url.split("access_token=")[0].rstrip("&?")
-                    
-                    demos = ad.get("demographic_distribution") or []
-                    top_demo = "General NC Electorate"
-                    if demos:
-                        top_entry = max(demos, key=lambda d: float(d.get("percentage", 0)))
-                        top_demo = f"{top_entry.get('gender', 'All').capitalize()} {top_entry.get('age', '')}"
-                    
-                    themes = classify_text(body)
-                    live_creatives.append({
-                        "advertiser": ad.get("page_name", "Unknown Advertiser"),
-                        "date": ad.get("ad_creation_time", "")[:10],
-                        "body": body,
-                        "spend_band": spend_str,
-                        "top_demo": top_demo,
-                        "themes": themes,
-                        "url": snap_url,
-                        "platform": "Meta Live",
-                    })
-        except Exception as exc:
-            logger.warning(f"Live Meta API ad query fallback: {exc}")
-
-    if live_creatives:
-        return live_creatives
-
-    return [
-        {
-            "advertiser": "NC Republican Party (NCGOP)",
-            "date": "Oct 22, 2026",
-            "body": "North Carolina families can't afford four more years of out-of-control inflation and tax hikes. Ted Budd and our Republican team are fighting to lower the cost of living and secure good-paying jobs for our communities.",
-            "spend_band": "$25k – $50k",
-            "top_demo": "Women 35–54",
-            "themes": ["economy", "inflation", "character_attack"],
-            "url": "https://www.facebook.com/ads/library/?id=2001001",
-            "platform": "Meta"
-        },
-        {
-            "advertiser": "Carolina Future PAC",
-            "date": "Oct 21, 2026",
-            "body": "Law enforcement needs real backing, not empty promises. Violent crime affects neighborhoods across Charlotte and the Piedmont. Back the blue and restore public safety.",
-            "spend_band": "$10k – $20k",
-            "top_demo": "Men 45–64",
-            "themes": ["crime", "police"],
-            "url": "https://www.facebook.com/ads/library/?id=2001002",
-            "platform": "Meta"
-        },
-        {
-            "advertiser": "Liberty NC Alliance",
-            "date": "Oct 19, 2026",
-            "body": "Protect our southern border and stop the flood of illicit fentanyl into our state. Border security is public security.",
-            "spend_band": "$5k – $10k",
-            "top_demo": "All 45+",
-            "themes": ["immigration", "border"],
-            "url": "https://www.facebook.com/ads/library/?id=2001003",
-            "platform": "Meta"
-        },
-        {
-            "advertiser": "NC House Republican Majority",
-            "date": "Oct 18, 2026",
-            "body": "Parents deserve a voice in their children's education. We passed historic school choice legislation so every student can thrive.",
-            "spend_band": "$8k – $15k",
-            "top_demo": "Parents 25–44",
-            "themes": ["education"],
-            "url": "https://www.facebook.com/ads/library/?id=2001004",
-            "platform": "Meta"
-        }
-    ]
+def load_statewide() -> dict:
+    return read_table("statewide").iloc[0].to_dict()
 
 
 @st.cache_data(ttl=600)
-def load_opponent_advertiser_table() -> pd.DataFrame:
-    """
-    Returns committee-level opponent spending table.
-    """
-    return pd.DataFrame([
-        {"Committee / Advertiser": "NC Republican Party", "Side": "Opponent", "Spend Band": "$3.8M – $4.9M", "Active Ads": 420, "Top Focus": "Economy & Inflation"},
-        {"Committee / Advertiser": "Carolina Future PAC", "Side": "Ally Opponent", "Spend Band": "$2.1M – $2.8M", "Active Ads": 180, "Top Focus": "Crime & Law Enforcement"},
-        {"Committee / Advertiser": "NC Senate Republican Caucus", "Side": "Opponent", "Spend Band": "$1.4M – $1.9M", "Active Ads": 145, "Top Focus": "Taxes & Spending"},
-        {"Committee / Advertiser": "Liberty NC Alliance", "Side": "Ally Opponent", "Spend Band": "$850k – $1.2M", "Active Ads": 95, "Top Focus": "Immigration"},
-        {"Committee / Advertiser": "Defend NC Values", "Side": "Ally Opponent", "Spend Band": "$450k – $680k", "Active Ads": 48, "Top Focus": "Education & Curriculum"},
-    ])
+def load_creatives(side_group: str = "GOP side", limit: int = 400) -> pd.DataFrame:
+    """Inspectable creatives with text (Meta) plus Google ads (link to the Transparency Report)."""
+    ads = load_ads()
+    a = ads[ads["side_group"] == side_group].copy()
+    a["has_text"] = a["body"].str.len() > 0
+    a = a.sort_values(["has_text", "start"], ascending=[False, False]).head(limit)
+    if has_table("meta_demographics"):
+        d = read_table("meta_demographics")
+        d = d[d["ad_id"].isin(a["ad_id"])].sort_values("pct", ascending=False).drop_duplicates("ad_id")
+        top = d.set_index("ad_id").apply(lambda r: f"{str(r.gender).title()} {r.age} ({r.pct:.0%})", axis=1)
+        a["top_demo"] = a["ad_id"].map(top).fillna("—")
+    else:
+        a["top_demo"] = "—"
+    return a
+
+
+def fmt_money(x: float) -> str:
+    x = float(x or 0)
+    if abs(x) >= 1e6:
+        return f"${x / 1e6:.2f}M"
+    if abs(x) >= 1e3:
+        return f"${x / 1e3:.0f}k"
+    return f"${x:,.0f}"
+
+
+def esc(text: str) -> str:
+    """Escape $ so Streamlit markdown doesn't render money as LaTeX."""
+    return text.replace("$", "\\$")

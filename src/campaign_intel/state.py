@@ -1,86 +1,60 @@
 """
-Global session state initialization and URL query-param synchronization.
+Global session state + URL query-param sync (PROJECT_DESIGN.md §8.2), so views are deep-linkable:
+?scope=statewide&geo_mode=district&unit_type=cd&theme=dark
 """
 
-import pandas as pd
+from __future__ import annotations
+
 import streamlit as st
 
 from campaign_intel.config import (
     DEFAULT_DISTRICT_TYPE,
     DEFAULT_GEO_MODE,
     DEFAULT_SCOPE,
+    DEFAULT_THEME,
     DISTRICT_TYPES,
     GEO_MODES,
     SCOPES,
 )
 
-
-def init_state():
-    """
-    Initializes st.session_state with default values, syncing with st.query_params.
-    Allows shareable deep links with ?scope=...&unit_type=...&theme=...
-    """
-    # 1. Theme
-    if "theme" not in st.session_state:
-        param_theme = st.query_params.get("theme")
-        st.session_state.theme = param_theme if param_theme in ["light", "dark"] else "dark"
-    st.query_params["theme"] = st.session_state.theme
-
-    # 2. Scope (statewide vs district)
-    if "scope" not in st.session_state:
-        param_scope = st.query_params.get("scope", DEFAULT_SCOPE)
-        st.session_state.scope = param_scope if param_scope in SCOPES else DEFAULT_SCOPE
-    st.query_params["scope"] = st.session_state.scope
-
-    # 3. Geo Mode (district vs county)
-    if "geo_mode" not in st.session_state:
-        param_geo = st.query_params.get("geo_mode", DEFAULT_GEO_MODE)
-        st.session_state.geo_mode = param_geo if param_geo in GEO_MODES else DEFAULT_GEO_MODE
-    st.query_params["geo_mode"] = st.session_state.geo_mode
-
-    # 4. District Type (cd, sd, hd)
-    if "unit_type" not in st.session_state:
-        param_utype = st.query_params.get("unit_type", DEFAULT_DISTRICT_TYPE)
-        st.session_state.unit_type = param_utype if param_utype in DISTRICT_TYPES else DEFAULT_DISTRICT_TYPE
-    st.query_params["unit_type"] = st.session_state.unit_type
-
-    # 5. Target Unit (e.g. for single district race)
-    if "target_unit" not in st.session_state:
-        st.session_state.target_unit = st.query_params.get("target_unit", None)
-    if st.session_state.target_unit:
-        st.query_params["target_unit"] = st.session_state.target_unit
-    elif "target_unit" in st.query_params and not st.session_state.target_unit:
-        del st.query_params["target_unit"]
-
-    # 6. Selected Unit (for drill-down and map selection cross-filtering)
-    if "selected_unit" not in st.session_state:
-        st.session_state.selected_unit = st.query_params.get("selected_unit", None)
-    if st.session_state.selected_unit:
-        st.query_params["selected_unit"] = st.session_state.selected_unit
-    elif "selected_unit" in st.query_params and not st.session_state.selected_unit:
-        del st.query_params["selected_unit"]
-
-    # 7. Date Range
-    if "date_range" not in st.session_state:
-        st.session_state.date_range = st.query_params.get("date_range", "Last 8 weeks")
-    st.query_params["date_range"] = st.session_state.date_range
-
-    # 8. Alert Tracker
-    if "seen_alert_ids" not in st.session_state:
-        st.session_state.seen_alert_ids = set()
-
-    # 9. War Room Allocation DataFrame
-    if "allocation" not in st.session_state:
-        st.session_state.allocation = pd.DataFrame(columns=["unit_id", "channel", "audience", "week", "dollars"])
-
-    # 10. War Room Locked rows
-    if "locked_items" not in st.session_state:
-        st.session_state.locked_items = set()
+_PARAMS = {
+    "theme": (["light", "dark"], DEFAULT_THEME),
+    "scope": (SCOPES, DEFAULT_SCOPE),
+    "geo_mode": (GEO_MODES, DEFAULT_GEO_MODE),
+    "unit_type": (DISTRICT_TYPES, DEFAULT_DISTRICT_TYPE),
+}
+_FREE = ["target_unit", "selected_unit"]
 
 
-def toggle_theme():
-    """Toggles theme between light and dark and syncs to query params."""
-    current = st.session_state.get("theme", "light")
-    new_theme = "dark" if current == "light" else "light"
-    st.session_state.theme = new_theme
-    st.query_params["theme"] = new_theme
+def init_state() -> None:
+    for key, (allowed, default) in _PARAMS.items():
+        if key not in st.session_state:
+            val = st.query_params.get(key, default)
+            st.session_state[key] = val if val in allowed else default
+        st.query_params[key] = st.session_state[key]
+    for key in _FREE:
+        if key not in st.session_state:
+            st.session_state[key] = st.query_params.get(key) or None
+        _sync_free(key)
+    st.session_state.setdefault("seen_alert_ids", set())
+
+
+def _sync_free(key: str) -> None:
+    val = st.session_state.get(key)
+    if val:
+        st.query_params[key] = val
+    elif key in st.query_params:
+        del st.query_params[key]
+
+
+def set_state(**kwargs) -> None:
+    for key, val in kwargs.items():
+        st.session_state[key] = val
+        if key in _PARAMS:
+            st.query_params[key] = val
+        elif key in _FREE:
+            _sync_free(key)
+
+
+def toggle_theme() -> None:
+    set_state(theme="light" if st.session_state.get("theme", DEFAULT_THEME) == "dark" else "dark")

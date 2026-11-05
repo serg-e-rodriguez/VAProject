@@ -1,108 +1,101 @@
 """
-Top navigation bar component per UI_Design.md §4.2.
-Houses Scope Switcher, Geography Toggle, District Type Selector,
-Alerts Popover, Freshness Chip, and Theme Switcher with responsive sizing.
+Top bar (UI_Design.md §4.2): page title, race scope, geography, district type, alerts,
+data-freshness chip and theme switch. All state lives in st.session_state + query params.
 """
+
+from __future__ import annotations
+
+import html
 
 import streamlit as st
 
-from campaign_intel.state import toggle_theme
+from campaign_intel.config import SCOPE_LABELS
+from campaign_intel.data.loaders import load_alerts, load_manifest, snapshot_ready
+from campaign_intel.state import set_state, toggle_theme
+
+UTYPE_LABELS = {"cd": "Congressional (14)", "sd": "State Senate (50)", "hd": "State House (120)"}
 
 
-def render_topbar(page_title: str):
-    """
-    Renders top navigation bar in a bordered container with responsive columns.
-    Ensures button texts and icons never exceed their bounding boxes.
-    """
-    current_theme = st.session_state.get("theme", "dark")
+def _freshness_chip() -> str:
+    m = load_manifest()
+    if not m:
+        return "<span class='fresh-chip stale'>No snapshot</span>"
+    built = m.get("built_at", "")[:16].replace("T", " ")
+    tip = html.escape(
+        f"Snapshot built {built} UTC · Google report updated {m.get('google_report_updated', '?')[:16]} · "
+        f"Meta ads through {m.get('meta_latest_ad_start', '?')} · NCSBE 2026 results file "
+        f"{m.get('statewide', {}).get('sen26_file_date', '?')}")
+    return f"<span class='fresh-chip' title='{tip}'>Snapshot · {built[:10]}</span>"
+
+
+def render_topbar(page_title: str) -> None:
+    theme = st.session_state.get("theme", "dark")
     scope = st.session_state.get("scope", "statewide")
     geo_mode = st.session_state.get("geo_mode", "district")
     unit_type = st.session_state.get("unit_type", "cd")
 
+    if not snapshot_ready():
+        st.error("No data snapshot found. Build it once with: `uv run python -m campaign_intel.ingest.build_snapshot`")
+        st.stop()
+
     with st.container(border=True):
-        col_title, col_scope, col_geo, col_type, col_alerts, col_chip, col_theme = st.columns(
-            [2.8, 1.4, 1.3, 1.5, 1.2, 1.7, 1.1],
-            vertical_alignment="center",
-            gap="small"
-        )
-
-        with col_title:
-            st.markdown(
-                f"<h3 style='margin:0; font-size:17px; font-weight:800; color:var(--text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;' title='{page_title}'>{page_title}</h3>",
-                unsafe_allow_html=True
-            )
-
-        with col_scope:
-            scope_idx = 0 if scope == "statewide" else 1
-            new_scope = st.selectbox(
-                "Race Scope",
-                options=["Statewide", "District Race"],
-                index=scope_idx,
-                label_visibility="collapsed",
-                key="topbar_scope_select"
-            )
-            parsed_scope = "statewide" if new_scope == "Statewide" else "district"
-            if parsed_scope != scope:
-                st.session_state.scope = parsed_scope
-                st.query_params["scope"] = parsed_scope
+        r1_title, r1_chip, r1_alerts, r1_theme = st.columns([7.4, 1.6, 0.8, 0.6], vertical_alignment="center", gap="small")
+        with r1_title:
+            st.markdown(f"<h3 class='topbar-title' title='{html.escape(page_title)}'>{html.escape(page_title)}</h3>",
+                        unsafe_allow_html=True)
+        c_scope, c_geo, c_type, _ = st.columns([2.2, 1.7, 2.2, 3.9], vertical_alignment="center", gap="small")
+        c_alerts, c_chip, c_theme = r1_alerts, r1_chip, r1_theme
+        with c_scope:
+            opts = list(SCOPE_LABELS)
+            new = st.selectbox("Race scope", opts, index=opts.index(scope) if scope in opts else 0,
+                               format_func=SCOPE_LABELS.get, label_visibility="collapsed", key="tb_scope",
+                               help="Statewide = US Senate race. District = one district's race. "
+                                    "Chamber = majority of the selected district type.")
+            if new != scope:
+                set_state(scope=new)
+                if new == "chamber" and geo_mode == "county":
+                    set_state(geo_mode="district")
                 st.rerun()
-
-        with col_geo:
-            geo_idx = 0 if geo_mode == "district" else 1
-            new_geo = st.segmented_control(
-                "Geo View",
-                options=["District", "County"],
-                default=["District", "County"][geo_idx],
-                label_visibility="collapsed",
-                key="topbar_geo_segmented"
-            )
-            parsed_geo = (new_geo or "District").lower()
-            if parsed_geo != geo_mode:
-                st.session_state.geo_mode = parsed_geo
-                st.query_params["geo_mode"] = parsed_geo
+        with c_geo:
+            new_geo = st.segmented_control("Geography", ["District", "County"],
+                                           default="County" if geo_mode == "county" else "District",
+                                           label_visibility="collapsed", key="tb_geo")
+            parsed = (new_geo or "District").lower()
+            if parsed != geo_mode:
+                set_state(geo_mode=parsed, selected_unit=None, target_unit=None)
+                if parsed == "county" and scope != "statewide":
+                    set_state(scope="statewide")
                 st.rerun()
-
-        with col_type:
+        with c_type:
             if geo_mode == "district":
-                utype_map = {"cd": "Congressional", "sd": "State Senate", "hd": "State House"}
-                reverse_map = {"Congressional": "cd", "State Senate": "sd", "State House": "hd"}
-                current_label = utype_map.get(unit_type, "Congressional")
-                new_utype_label = st.selectbox(
-                    "District Type",
-                    options=["Congressional", "State Senate", "State House"],
-                    index=["Congressional", "State Senate", "State House"].index(current_label),
-                    label_visibility="collapsed",
-                    key="topbar_utype_select"
-                )
-                parsed_utype = reverse_map[new_utype_label]
-                if parsed_utype != unit_type:
-                    st.session_state.unit_type = parsed_utype
-                    st.query_params["unit_type"] = parsed_utype
-                    st.session_state.selected_unit = None
+                keys = list(UTYPE_LABELS)
+                new_u = st.selectbox("District type", keys, index=keys.index(unit_type), format_func=UTYPE_LABELS.get,
+                                     label_visibility="collapsed", key="tb_utype")
+                if new_u != unit_type:
+                    set_state(unit_type=new_u, selected_unit=None, target_unit=None)
                     st.rerun()
             else:
-                st.markdown("<span style='font-size:12px; color:var(--text-muted);'>100 NC Counties</span>", unsafe_allow_html=True)
-
-        with col_alerts, st.popover("🔔 Alerts", use_container_width=True):
-            st.markdown("#### 🚨 Opponent & Market Alerts")
-            st.markdown("""
-                - **NCGOP & Allies**: +18 new video ads in Raleigh & Charlotte DMAs (last 48h).
-                - **Theme Emergence**: Opponent increased Economy & Inflation ads (+35%).
-                - **Spend Tier Surge**: Forward NC PAC raised Meta weekly flight to ≥ $50k.
-                """)
-            if st.button("Open Opponent Tracker", key="topbar_goto_opponent", use_container_width=True):
-                st.switch_page("app_pages/opponent.py")
-
-        with col_chip:
-            chip_html = """
-            <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); background-color: var(--accent-soft); border: 1px solid rgba(43,181,122,0.25); border-radius: 999px; padding: 6px 10px; text-align: center; white-space: nowrap;">
-                🟢 Meta API Live · BQ Oct 2026
-            </div>
-            """
-            st.markdown(chip_html, unsafe_allow_html=True)
-
-        with col_theme:
-            theme_label = "☀️ Light" if current_theme == "dark" else "🌙 Dark"
-            if st.button(theme_label, key="topbar_theme_toggle_btn", help="Switch Light/Dark theme", use_container_width=True):
+                st.caption("100 NC counties")
+        with c_alerts:
+            alerts = load_alerts()
+            unseen = [a for a in alerts["alert_id"] if a not in st.session_state.get("seen_alert_ids", set())]
+            label = f"🔔 {len(unseen)}" if unseen else "🔔"
+            with st.popover(label, width="stretch", help="Opponent activity alerts from the snapshot"):
+                st.markdown("**GOP-side activity alerts**")
+                if alerts.empty:
+                    st.caption("No alerts in the last 7 days of the snapshot.")
+                for a in alerts.head(8).itertuples():
+                    icon = "🔴" if a.severity == "high" else "🟠"
+                    st.markdown(f"{icon} **{a.type}** — {a.text}")
+                c1, c2 = st.columns(2)
+                if c1.button("Mark read", key="tb_alert_read", width="stretch"):
+                    st.session_state.seen_alert_ids = set(alerts["alert_id"])
+                    st.rerun()
+                if c2.button("Opponent page", key="tb_goto_opp", width="stretch"):
+                    st.switch_page("app_pages/opponent.py")
+        with c_chip:
+            st.markdown(_freshness_chip(), unsafe_allow_html=True)
+        with c_theme:
+            if st.button("☀️" if theme == "dark" else "🌙", key="tb_theme", help="Switch light / dark", width="stretch"):
                 toggle_theme()
                 st.rerun()

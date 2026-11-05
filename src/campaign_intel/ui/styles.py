@@ -271,12 +271,13 @@ def inject(theme: str = "dark"):
 
     .kpi-main {{
         display: flex;
+        flex-wrap: wrap;
         align-items: baseline;
-        gap: 8px;
+        gap: 4px 8px;
     }}
 
     .kpi-value {{
-        font-size: 26px;
+        font-size: 24px;
         font-weight: 800;
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
@@ -333,6 +334,18 @@ def inject(theme: str = "dark"):
     }}
 
     /* Model Ribbon */
+    .topbar-title {{ margin: 0; font-size: 17px; font-weight: 800; color: var(--text-primary);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .fresh-chip {{ display: inline-block; font-size: 11px; font-weight: 600; color: var(--text-secondary);
+        background: var(--accent-soft); border: 1px solid var(--border); border-radius: 999px;
+        padding: 6px 10px; white-space: nowrap; cursor: help; }}
+    .fresh-chip.stale {{ background: rgba(224,72,72,0.12); }}
+    .insight {{ border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px;
+        border-radius: 8px; margin-bottom: 10px; font-size: 13px; color: var(--text-primary); }}
+    .insight.dem {{ border-left-color: var(--dem); background: rgba(91,141,239,0.10); }}
+    .insight.rep {{ border-left-color: var(--rep); background: rgba(240,99,99,0.10); }}
+    .insight b {{ font-weight: 700; }}
+    .insight .sub {{ display: block; color: var(--text-secondary); font-size: 12px; margin-top: 3px; }}
     .model-ribbon {{
         background-color: rgba(34, 160, 107, 0.12);
         border: 1px solid rgba(43, 181, 122, 0.35);

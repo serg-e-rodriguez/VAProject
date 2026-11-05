@@ -49,16 +49,9 @@ def create_altair_theme(theme_name: str = "light") -> dict:
                 "titleFont": "Mulish, sans-serif"
             },
             "range": {
-                "category": [
-                    t["dem"],
-                    t["rep"],
-                    t["accent"],
-                    t["swing"],
-                    t["neutral_series"],
-                    "#38BDF8",
-                    "#FB923C",
-                    "#A855F7"
-                ],
+                "category": (["#199e70", "#d95926", "#9085e9", "#c98500", "#d55181", "#3987e5", "#008300", "#e66767"]
+                             if theme_name == "dark" else
+                             ["#1baf7a", "#eb6834", "#6250d6", "#eda100", "#e87ba4", "#2a78d6", "#008300", "#e34948"]),
                 "diverging": [
                     t["rep"],
                     "#F7F7F7" if theme_name == "light" else "#2A2F3A",

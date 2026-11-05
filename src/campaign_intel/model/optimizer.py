@@ -1,139 +1,129 @@
 """
-Greedy Marginal Budget Optimizer per §7.7 and §7.9.
-Allocates budget in discrete increments ($10,000) to maximize net votes.
+Greedy marginal optimizer (PROJECT_DESIGN.md §7.7), fully vectorized.
+
+Each step evaluates the expected (mode-parameter) gain of adding one `step` of dollars to
+EVERY feasible (unit, channel, audience, week) at once, picks the best, and repeats.
+
+Objective weights per unit turn votes into what the race needs:
+- statewide : every unit's votes count equally (weight 1)
+- district  : only the target unit counts
+- chamber   : weight = probability density of the unit being on the knife's edge
+              (d P(win_u) / d votes), so votes go where they can flip seats.
+The reported "marginal_votes" are always raw expected net votes.
+
+Model: same adstock + saturation form as the engine, at mode parameters. Adding $x to line
+(u, c, a, w) adds x/CPM_c*1000*rho^(W-w) to the (u, a) adstock S, and the gain is
+U*effect*opp*(exp(-kS/U) - exp(-k(S+dS)/U)). Lines are compared on gain per dollar.
+
+Caps: a line item can't buy more than `cap_mult` impressions per universe member in a week
+(default 5). Increments are min(step, room under the cap), so small districts still get money.
 """
 
-from typing import Literal
+from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
+from campaign_intel.config import AUDIENCES, CHANNELS
 from campaign_intel.model.assumptions import Assumptions
-from campaign_intel.model.engine import RaceContext, compute_expected_marginal_votes
+from campaign_intel.model.engine import (
+    ALLOC_COLS,
+    RaceContext,
+    _opp_factor,
+    _relevant_mask,
+    _tensor,
+    _universe,
+    baseline_margins,
+    clean_allocation,
+)
+
+
+def unit_weights(ctx: RaceContext, a: Assumptions) -> np.ndarray:
+    ids = ctx.units["unit_id"].astype(str).to_numpy()
+    if ctx.scope == "chamber":
+        base, turn = baseline_margins(ctx, a)
+        sd = np.sqrt(a.sigma_state**2 + a.sigma_unit**2) / 100.0 * np.maximum(turn, 1.0)
+        z = base / sd
+        w = np.exp(-0.5 * z**2) / sd
+        return w / w.max() if w.max() > 0 else np.ones(len(ids))
+    return _relevant_mask(ctx, ids).astype(float)
 
 
 def optimize(
-    current: pd.DataFrame,
+    current: pd.DataFrame | None,
     ctx: RaceContext,
     a: Assumptions,
     step: float = 10_000.0,
-    objective: Literal["votes", "win_prob"] = "votes",
+    channels: list[str] | None = None,
     locks: pd.DataFrame | None = None,
+    rebuild: bool = False,
+    cap_mult: float = 5.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Greedy marginal allocation in increments of step (default $10,000).
-    Evaluates expected net vote return across eligible (unit, channel, audience, week).
-    Returns (recommended_allocation, diff_df).
+    Returns (recommended_allocation, diff). With rebuild=True the plan restarts from the
+    locked rows only; otherwise the remaining budget is added on top of `current`.
     """
-    # Start from current or locked allocation
-    if locks is not None and not locks.empty:
-        working_alloc = locks.copy()
-    elif current is not None and not current.empty:
-        working_alloc = current.copy()
-    else:
-        working_alloc = pd.DataFrame(columns=["unit_id", "channel", "audience", "week", "dollars"])
+    units = ctx.units.reset_index(drop=True)
+    ids = units["unit_id"].astype(str).to_numpy()
+    idx = {u: i for i, u in enumerate(ids)}
+    W = ctx.weeks
+    start = clean_allocation(locks if rebuild else current, W)
+    X = _tensor(start, idx, len(units), W)                      # (U, C, A, W)
+    remaining = float(ctx.budget - X.sum())
 
-    working_alloc["dollars"] = pd.to_numeric(working_alloc["dollars"], errors="coerce").fillna(0.0)
-    current_spent = float(working_alloc["dollars"].sum())
-    remaining_budget = max(0.0, ctx.budget - current_spent)
+    allowed_c = np.array([c in (channels or CHANNELS) for c in CHANNELS])
+    weights = unit_weights(ctx, a)
+    cand_units = np.where(weights > 1e-6)[0]
+    empty_diff = pd.DataFrame(columns=["unit_id", "channel", "audience", "week", "delta_dollars", "marginal_votes"])
+    if remaining < 500 or len(cand_units) == 0:
+        return _to_frame(X, ids), empty_diff
 
-    if remaining_budget < step:
-        return working_alloc, pd.DataFrame(columns=["unit_id", "channel", "audience", "week", "delta_dollars", "marginal_votes"])
+    Xs = X[cand_units]
+    univ = _universe(units)[cand_units]                         # (U, A)
+    opp = _opp_factor(units, a)[cand_units]
+    wts = weights[cand_units]
+    cpm = np.array([a.cpm[c][1] for c in CHANNELS])
+    k, rho = a.saturation_k[1], a.retention_rho[1]
+    effect = np.array([a.persuasion_p[1], a.turnout_t[1] * (2 * a.dem_share_mobilized - 1)])
+    decay = rho ** (W - np.arange(1, W + 1))                    # (W,)
+    scale = univ * effect[None, :] * opp[:, None]               # (U, A) votes at full reach
+    cap = cap_mult * univ[:, None, :, None] * cpm[None, :, None, None] / 1000.0  # (U, C, A, 1) $
+    stock_per_dollar = (1000.0 / cpm)[None, :, None, None] * decay[None, None, None, :]  # (1, C, 1, W)
+    min_inc = min(step, 500.0)
 
-    # Determine candidate units
-    # For statewide: consider swing/competitive units first, then others
-    units_df = ctx.units.copy()
-    if ctx.scope == "district" and ctx.target_unit:
-        candidate_units = [ctx.target_unit]
-    else:
-        # Prioritize top competitive units (margin within +-15%) to speed up greedy steps
-        if "dem_margin_pct" in units_df.columns:
-            comp_mask = units_df["dem_margin_pct"].abs() <= 18.0
-            candidate_units = units_df[comp_mask]["unit_id"].tolist()
-            if len(candidate_units) < 3:
-                candidate_units = units_df["unit_id"].tolist()
-        else:
-            candidate_units = units_df["unit_id"].tolist()
-
-    channels = ["meta", "youtube", "search"]
-    audiences = ["persuasion", "mobilization"]
-    # Later weeks count more due to decay rho^(W - w), test last 3 weeks
-    weeks = [max(1, ctx.weeks - 2), max(1, ctx.weeks - 1), ctx.weeks]
-
-    diff_records = []
-    # Build indexed map of allocations
-    alloc_map = {}
-    for _, row in working_alloc.iterrows():
-        key = (str(row["unit_id"]), str(row["channel"]), str(row["audience"]), int(row["week"]))
-        alloc_map[key] = alloc_map.get(key, 0.0) + float(row["dollars"])
-
-    # Base vote calculation
-    _, _, current_base_votes = compute_expected_marginal_votes(working_alloc, ctx, a)
-
-    # Greedy allocation loop
-    while remaining_budget >= step:
-        best_cand = None
-        best_marginal_gain = -1.0
-
-        for uid in candidate_units:
-            for ch in channels:
-                for aud in audiences:
-                    for wk in weeks:
-                        cand_key = (uid, ch, aud, wk)
-                        # Check cap (no single line item > 250,000)
-                        if alloc_map.get(cand_key, 0.0) >= 250_000.0:
-                            continue
-
-                        # Test adding step
-                        alloc_map[cand_key] = alloc_map.get(cand_key, 0.0) + step
-
-                        # Build temp DataFrame
-                        temp_rows = [
-                            {"unit_id": k[0], "channel": k[1], "audience": k[2], "week": k[3], "dollars": v}
-                            for k, v in alloc_map.items() if v > 0
-                        ]
-                        df_temp = pd.DataFrame(temp_rows)
-                        _, _, new_votes = compute_expected_marginal_votes(df_temp, ctx, a)
-                        marginal_gain = new_votes - current_base_votes
-
-                        if marginal_gain > best_marginal_gain:
-                            best_marginal_gain = marginal_gain
-                            best_cand = cand_key
-
-                        # Revert test step
-                        alloc_map[cand_key] -= step
-
-        if best_cand is None or best_marginal_gain <= 0.0:
+    diff_rows = []
+    while remaining >= min_inc:
+        S = np.einsum("ucaw,cw->ua", Xs, (1000.0 / cpm)[:, None] * decay[None, :])      # (U, A)
+        inc = np.minimum(np.minimum(step, cap - Xs), remaining)                         # (U, C, A, W)
+        dS = inc * stock_per_dollar
+        gain = scale[:, None, :, None] * np.exp(-k * S / univ)[:, None, :, None] * \
+            (1.0 - np.exp(-k * dS / univ[:, None, :, None]))
+        feasible = (inc >= min_inc) & allowed_c[None, :, None, None]
+        score = np.where(feasible, gain * wts[:, None, None, None] / np.maximum(inc, 1.0), -np.inf)
+        best = np.unravel_index(np.argmax(score), score.shape)
+        if not np.isfinite(score[best]) or score[best] <= 0:
             break
+        Xs[best] += inc[best]
+        remaining -= inc[best]
+        u, c, aa, w = best
+        diff_rows.append({"unit_id": ids[cand_units[u]], "channel": CHANNELS[c], "audience": AUDIENCES[aa],
+                          "week": int(w) + 1, "delta_dollars": float(inc[best]), "marginal_votes": float(gain[best])})
 
-        # Apply winning step
-        alloc_map[best_cand] = alloc_map.get(best_cand, 0.0) + step
-        remaining_budget -= step
-        current_base_votes += best_marginal_gain
+    X[cand_units] = Xs
+    rec = _to_frame(X, ids)
+    if not diff_rows:
+        return rec, empty_diff
+    diff = (pd.DataFrame(diff_rows).groupby(["unit_id", "channel", "audience", "week"], as_index=False)
+            .agg(delta_dollars=("delta_dollars", "sum"), marginal_votes=("marginal_votes", "sum"))
+            .sort_values("delta_dollars", ascending=False).reset_index(drop=True))
+    return rec, diff
 
-        diff_records.append({
-            "unit_id": best_cand[0],
-            "channel": best_cand[1],
-            "audience": best_cand[2],
-            "week": best_cand[3],
-            "delta_dollars": step,
-            "marginal_votes": round(best_marginal_gain, 1)
-        })
 
-    # Assemble recommended allocation DataFrame
-    rec_rows = [
-        {"unit_id": k[0], "channel": k[1], "audience": k[2], "week": k[3], "dollars": v}
-        for k, v in alloc_map.items() if v > 0
-    ]
-    recommended_df = pd.DataFrame(rec_rows)
-    if recommended_df.empty:
-        recommended_df = pd.DataFrame(columns=["unit_id", "channel", "audience", "week", "dollars"])
-
-    diff_df = pd.DataFrame(diff_records)
-    if not diff_df.empty:
-        # Group identical incremental steps for clean UI display
-        diff_df = diff_df.groupby(["unit_id", "channel", "audience", "week"], as_index=False).agg({
-            "delta_dollars": "sum",
-            "marginal_votes": "sum"
-        }).sort_values("marginal_votes", ascending=False)
-
-    return recommended_df, diff_df
+def _to_frame(X: np.ndarray, ids: np.ndarray) -> pd.DataFrame:
+    u, c, a, w = np.nonzero(X)
+    if len(u) == 0:
+        return pd.DataFrame(columns=ALLOC_COLS)
+    return pd.DataFrame({
+        "unit_id": ids[u], "channel": np.array(CHANNELS)[c], "audience": np.array(AUDIENCES)[a],
+        "week": w + 1, "dollars": X[u, c, a, w],
+    }).sort_values(["unit_id", "week", "channel"]).reset_index(drop=True)
