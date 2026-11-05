@@ -10,8 +10,11 @@ Verified API behaviour (Graph API v23, Nov 2026):
 Two-stage pull:
 1. Seed scan (light fields) over the window -> NC share per ad -> NC-focused pages
    (pages whose ads put >= PAGE_FOCUS_MIN of their spend in NC).
-2. Full-field fetch of every ad from those pages, plus the full-field records from the seed
-   for big national ads, so totals include NC-apportioned national money.
+   The wildcard scan is newest-first and capped; keyword scans (NC places, candidates, parties)
+   add smaller NC pages it may miss.
+2. Full-field fetch of every ad from those pages since the window start. Pages below the NC
+   focus threshold (national advertisers) are only summarised as one NC-apportioned spend total
+   (meta_national_nc_spend) — their ads are not in the creative library or side totals.
 
 NC spend per ad = spend band x NC delivery share (Modeled).
 """

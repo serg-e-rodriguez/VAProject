@@ -160,9 +160,10 @@ def outcome_histogram(df: pd.DataFrame, theme: str = "light", x_title: str = "St
     d = df.copy()
     d["mid"] = (d["bin_start"] + d["bin_end"]) / 2
     fmt = ",d" if discrete else "+,.0f"
-    plan = alt.Chart(d[d["series"] == "With plan"]).mark_bar(opacity=0.85, binSpacing=0).encode(
+    d["zero"] = 0
+    plan = alt.Chart(d[d["series"] == "With plan"]).mark_bar(opacity=0.85, orient="vertical").encode(
         x=alt.X("bin_start:Q", title=x_title, axis=alt.Axis(format="~s" if not discrete else "d")),
-        x2="bin_end:Q", y=alt.Y("count:Q", title="Simulated outcomes"),
+        x2="bin_end:Q", y=alt.Y("count:Q", title="Simulated outcomes"), y2="zero:Q",
         color=alt.condition(alt.datum.is_win, alt.value(t["dem"]), alt.value(t["rep"])),
         tooltip=[alt.Tooltip("mid:Q", title="Outcome ≈", format=fmt), alt.Tooltip("count:Q", title="Draws (plan)"),
                  alt.Tooltip("series:N")])

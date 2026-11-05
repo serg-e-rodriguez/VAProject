@@ -79,7 +79,7 @@ def choropleth(unit_type: str, df_metrics: pd.DataFrame, metric_col: str, metric
         color_scale = alt.Scale(domain=[-m, 0, m], range=[t["rep"], t["border"], t["dem"]], clamp=True)
     else:
         lo = "#E8EEFC" if theme == "light" else "#232B3D"
-        color_scale = alt.Scale(range=[lo, t["dem"]], domainMin=0, zero=True)
+        color_scale = alt.Scale(range=[lo, t["dem"]], zero=False, nice=False)
 
     tips = [alt.Tooltip("properties.unit_name:N", title="Area"), alt.Tooltip("properties.unit_id:N", title="ID"),
             alt.Tooltip("properties.metric:Q", title=metric_label, format=fmt)]

@@ -18,7 +18,7 @@ from campaign_intel.data.loaders import (
 from campaign_intel.processing.themes import theme_labels
 from campaign_intel.ui.components import chart_card_header, creative_card, kpi_card
 from campaign_intel.ui.topbar import render_topbar
-from campaign_intel.viz.charts import area_with_band, ranked_bar, share_of_voice_line
+from campaign_intel.viz.charts import area_with_band, ranked_bar, share_of_voice_line, side_scale
 
 render_topbar("Opponent Tracker & Creative Ledger")
 theme = st.session_state.get("theme", "dark")
@@ -51,7 +51,7 @@ with c3:
              good_direction="neutral", fidelity="modeled", band="Keyword theme classifier on Meta ad text")
 with c4:
     top_a = gop_adv.iloc[0] if len(gop_adv) else None
-    kpi_card("Biggest GOP-side spender", top_a["advertiser"].title() if top_a is not None else "—",
+    kpi_card("Biggest GOP-side spender", top_a["advertiser"] if top_a is not None else "—",
              delta=fmt_money(top_a["nc_spend_mid"]) if top_a is not None else None, good_direction="neutral",
              fidelity="modeled", band="NC-apportioned, this cycle")
 
@@ -69,12 +69,13 @@ g1, g2 = st.columns([7, 5], gap="medium")
 with g1, st.container(border=True):
     chart_card_header("GOP-side creative library", "Real ads from the Meta Ad Library and Google Transparency Report · "
                       "newest first", fidelity="observed")
-    f1, f2, f3 = st.columns(3)
+    f1, f2, f3, f4 = st.columns([1.2, 1.4, 1, 1], vertical_alignment="bottom")
     themes_avail = sorted({t for th in cre["message_themes"] for t in th})
     tf = f1.selectbox("Theme", ["All"] + themes_avail, format_func=lambda x: labels.get(x, x), key="opp_theme")
     af = f2.selectbox("Advertiser", ["All"] + gop_adv["advertiser"].head(30).tolist(), key="opp_adv")
     pf = f3.selectbox("Platform", ["All", "Meta", "Google"], key="opp_plat")
-    view = cre
+    big = f4.toggle("Hide ads < $1k", value=True, key="opp_big")
+    view = cre[cre["spend_high"] >= 1000] if big else cre
     if tf != "All":
         view = view[view["message_themes"].map(lambda th: tf in th)]
     if af != "All":
@@ -92,7 +93,8 @@ with g1, st.container(border=True):
 with g2, st.container(border=True):
     chart_card_header("GOP-side committees & PACs", "Modeled NC spend this cycle", fidelity="modeled")
     st.altair_chart(ranked_bar(gop_adv.head(12), "advertiser", "nc_spend_mid", theme, title="NC spend",
-                               low_col="nc_spend_low", high_col="nc_spend_high"), width="stretch")
+                               low_col="nc_spend_low", high_col="nc_spend_high", color_col="side_group",
+                               color_scale=side_scale(theme)), width="stretch")
     st.dataframe(gop_adv.head(25)[["advertiser", "platforms", "n_ads", "active_7d", "nc_spend_mid", "top_theme"]]
                  .assign(top_theme=lambda d: d["top_theme"].map(lambda x: labels.get(x, x))),
                  hide_index=True, width="stretch",

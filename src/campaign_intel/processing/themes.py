@@ -16,7 +16,7 @@ from campaign_intel.config import SEEDS_DIR
 FUNDRAISING_RE = re.compile(r"actblue|winred|anedot|\bchip in\b|\bdonate\b|split a donation|\bcontribut", re.IGNORECASE)
 GOTV_RE = re.compile(r"\bvote early\b|\bearly voting\b|one-stop|absentee ballot|polling place|\bvote by\b|"
                      r"election day|make a plan to vote|iwillvote|find your (?:polling|precinct)", re.IGNORECASE)
-NON_MESSAGE_THEMES = {"fundraising", "gotv"}
+NON_MESSAGE_THEMES = {"fundraising", "gotv", "general"}  # "general" = no keyword matched
 
 
 @lru_cache(maxsize=1)

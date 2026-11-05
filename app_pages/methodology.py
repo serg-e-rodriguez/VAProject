@@ -53,7 +53,9 @@ with center:
   mid = 1.5 × low and are shown as "≥ $low".
 - **Google:** multi-state creatives count 1/*n* states toward NC (this matched Google's own NC totals far better than counting
   them in full); nationwide-only ads count 0. `advertiser_geo_spend` is lifetime, so it's only used to find NC-focused advertisers.
-- **Meta:** NC spend = spend range × the ad's NC delivery share (`delivery_by_region`).
+- **Meta:** NC spend = spend range × the ad's NC delivery share (`delivery_by_region`). Ads are pulled for
+  **NC-focused pages** (≥ 50% of their spend delivered in NC), found by a capped newest-first scan of every political ad
+  delivered in NC plus keyword scans; national pages' small NC slices are excluded from side totals.
 - **Weekly series** spread each ad's NC spend evenly over its delivery days (Modeled). The trailing partial week is dropped.
 - **Sides** come from the seed file; unmatched advertisers stay *Unclassified* (never guessed).
 - **Themes** are a keyword classifier on Meta ad text (word-boundary matching); fundraising and GOTV ads are tagged and kept out
