@@ -36,6 +36,12 @@ DEFAULT_GEO_MODE = "district"
 DEFAULT_DISTRICT_TYPE = "cd"
 DEFAULT_THEME = "dark"
 
+# Races the app covers. Senate = statewide, mapped by county; House = the 14 congressional districts.
+RACES = {
+    "senate": {"label": "US Senate", "unit_type": "county", "unit_word": "county", "units_word": "counties"},
+    "house": {"label": "US House", "unit_type": "cd", "unit_word": "district", "units_word": "districts"},
+}
+
 # Allowed Choices
 CHANNELS = ["meta", "youtube", "search", "display", "ctv"]
 AUDIENCES = ["persuasion", "mobilization"]

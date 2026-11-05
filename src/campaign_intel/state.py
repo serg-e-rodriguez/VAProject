@@ -1,29 +1,19 @@
 """
-Global session state + URL query-param sync (PROJECT_DESIGN.md §8.2), so views are deep-linkable:
-?scope=statewide&geo_mode=district&unit_type=cd&theme=dark
+Global session state + URL query-param sync, so every view is deep-linkable:
+?race=senate&region=37183&theme=dark
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
-from campaign_intel.config import (
-    DEFAULT_DISTRICT_TYPE,
-    DEFAULT_GEO_MODE,
-    DEFAULT_SCOPE,
-    DEFAULT_THEME,
-    DISTRICT_TYPES,
-    GEO_MODES,
-    SCOPES,
-)
+from campaign_intel.config import DEFAULT_THEME, RACES
 
 _PARAMS = {
     "theme": (["light", "dark"], DEFAULT_THEME),
-    "scope": (SCOPES, DEFAULT_SCOPE),
-    "geo_mode": (GEO_MODES, DEFAULT_GEO_MODE),
-    "unit_type": (DISTRICT_TYPES, DEFAULT_DISTRICT_TYPE),
+    "race": (list(RACES), "senate"),
 }
-_FREE = ["target_unit", "selected_unit"]
+_FREE = ["region"]
 
 
 def init_state() -> None:
@@ -36,7 +26,6 @@ def init_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = st.query_params.get(key) or None
         _sync_free(key)
-    st.session_state.setdefault("seen_alert_ids", set())
 
 
 def _sync_free(key: str) -> None:
@@ -56,5 +45,13 @@ def set_state(**kwargs) -> None:
             _sync_free(key)
 
 
+def race() -> str:
+    return st.session_state.get("race", "senate")
+
+
+def theme() -> str:
+    return st.session_state.get("theme", DEFAULT_THEME)
+
+
 def toggle_theme() -> None:
-    set_state(theme="light" if st.session_state.get("theme", DEFAULT_THEME) == "dark" else "dark")
+    set_state(theme="light" if theme() == "dark" else "dark")

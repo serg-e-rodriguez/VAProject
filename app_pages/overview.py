@@ -1,109 +1,201 @@
 """
-Overview (UI_Design.md §6.1): where is the money going, and where are we out-spent relative
-to how close the race is?
+Overview: where the race stands, who is spending, and the electorate we have to win.
 """
 
+import pandas as pd
 import streamlit as st
 
 from campaign_intel.data.loaders import (
+    channel_by_side,
+    fmt_margin,
     fmt_money,
-    load_advertisers,
-    load_overview_kpis,
-    load_platform_mix,
+    fmt_num,
+    load_regions,
     load_statewide,
-    load_units,
-    load_weekly_by_side,
+    party_totals,
+    path_to_win,
+    senate_nominees,
+    spend_summary,
+    top_advertisers,
+    weekly_by_side,
+    went_dark,
 )
-from campaign_intel.ui.components import chart_card_header, insight, kpi_card
-from campaign_intel.ui.topbar import render_topbar
-from campaign_intel.viz.charts import area_with_band, ranked_bar, side_scale
-from campaign_intel.viz.maps import choropleth
+from campaign_intel.state import race, theme
+from campaign_intel.ui.components import chart, bullets, callout, kpi, page_header, section, source
+from campaign_intel.viz.charts import district_board, ranked_bars, registered_vs_voted, side_pair_bars, weekly_sides
 
-render_topbar("Campaign Overview & Ad Landscape")
-theme = st.session_state.get("theme", "dark")
-unit_type, geo_mode = st.session_state.get("unit_type", "cd"), st.session_state.get("geo_mode", "district")
-geo_key = "county" if geo_mode == "county" else unit_type
-
-k = load_overview_kpis()
+R, T = race(), theme()
 sw = load_statewide()
+s = spend_summary(R)
+regions = load_regions(R)
+pt = party_totals("state", "NC")
+state_margin = (sw["pres24_dem"] - sw["pres24_rep"]) / sw["pres24_total"] * 100
 
-c1, c2, c3, c4 = st.columns(4, gap="medium")
-with c1:
-    kpi_card("NC political ad spend since Jul 1", fmt_money(k["total_mid"]), fidelity="modeled",
-             band=f"Range {fmt_money(k['total_low'])} – {fmt_money(k['total_high'])} · Google + Meta, NC share",
-             spark_data=k["weekly_total"])
-with c2:
-    d = (k["dem_sov_4w"] - k["dem_sov_prev4w"]) * 100
-    kpi_card("Dem share of voice (4 wks)", f"{k['dem_sov_4w']:.1%}", delta=f"{d:+.1f} pts vs prior 4 wks",
-             good_direction="up", fidelity="modeled", band="Share of partisan NC spend (classified advertisers)",
-             spark_data=k["sov_series"])
-with c3:
-    g, gp = k["gop_last_week"], k["gop_prev_week"]
-    chg = (g / gp - 1) * 100 if gp else 0
-    kpi_card("GOP-side spend, last full week", fmt_money(g), delta=f"{chg:+.0f}% w/w", good_direction="down",
-             fidelity="modeled", band=f"Week of {k['last_week']}", spark_data=k["gop_series"])
-with c4:
-    kpi_card("Ads active, last 7 days (Dem vs GOP)", f"{k['active_dem']:,} vs {k['active_gop']:,}",
-             delta=f"+{k['new_dem_7d']:,} new Dem / +{k['new_gop_7d']:,} GOP", good_direction="neutral",
-             fidelity="observed", band="Meta Ad Library + Google Transparency Report")
+# ----------------------------------------------------------------------------- header + KPIs
+if R == "senate":
+    nom = senate_nominees()
+    page_header(f"US Senate · {nom['dem']} (D) vs {nom['rep']} (R)",
+                "Where the race stands, who is spending, and the voters we need.")
+else:
+    page_header("US House · 14 congressional districts",
+                "Where the seats stand, who is spending, and the voters we need in each district.")
 
-st.write("")
-with st.container(border=True):
-    h, ctrl = st.columns([7, 5])
-    with h:
-        chart_card_header("Electoral landscape", f"{'100 NC counties' if geo_mode == 'county' else geo_key.upper() + ' districts'} · "
-                          "2024 presidential margin from NCSBE precinct results (purple outline = within 5 pts)",
-                          fidelity="aggregated")
-    opts = ["2024 margin", "Expected midterm turnout"] + (["Google spend (2026 map)"] if geo_key == "cd" else [])
-    metric = ctrl.segmented_control("Map metric", opts, default=opts[0], key="ov_metric") or opts[0]
-    units = load_units(unit_type, geo_mode)
-    col = {"2024 margin": "dem_margin_pct", "Expected midterm turnout": "expected_turnout",
-           "Google spend (2026 map)": "google_spend_2026_map"}[metric]
-    m_col, l_col = st.columns([8, 4], gap="medium")
-    with m_col:
-        ch = choropleth(geo_key, units, col, metric, scale="diverging" if col == "dem_margin_pct" else "sequential",
-                        theme=theme, fmt="+.1f" if col == "dem_margin_pct" else ",.0f",
-                        extra_tooltips=[("dem_margin_pct", "2024 Dem margin", "+.1f"),
-                                        ("registered_voters", "Registered", ",.0f")], selectable=False)
-        st.altair_chart(ch, width="stretch")
-        if col == "google_spend_2026_map":
-            st.caption("Google's own district-level spend (geo_spend) for the 2026 congressional map — Observed, lifetime of that map.")
-    with l_col:
-        st.markdown("##### 🎯 Closest units")
-        st.caption("Smallest 2024 presidential margins — where small shifts decide seats")
-        close = units.assign(abs_m=units["dem_margin_pct"].abs()).nsmallest(8, "abs_m")
-        st.dataframe(close[["name", "dem_margin_pct", "expected_turnout"]], hide_index=True, width="stretch",
-                     column_config={"name": "Unit", "dem_margin_pct": st.column_config.NumberColumn("Margin", format="%+.1f"),
-                                    "expected_turnout": st.column_config.NumberColumn("Exp. turnout", format="%d")})
-        state_m = (sw["pres24_dem"] - sw["pres24_rep"]) / sw["pres24_total"] * 100
-        insight(f"Statewide 2024 baseline: Dem {state_m:+.1f} pts",
-                f"Harris {sw['pres24_dem']:,} vs Trump {sw['pres24_rep']:,} (NCSBE certified). "
-                f"Expected midterm turnout {sw['voted22_total']:,} (2022 ballots cast).", tone="rep" if state_m < 0 else "dem")
+k1, k2, k3, k4 = st.columns(4, gap="small")
+with k1:
+    kpi("Ad spend in this race", fmt_money(s["partisan"]),
+        f"Democrats {fmt_money(s['dem'])} · Republicans {fmt_money(s['gop'])}",
+        help="Google + Meta political ads attributed to this race, NC share, since Jul 1, 2026.")
+with k2:
+    d4 = (s["dem_share_4w"] - s["dem_share_prev4w"]) * 100
+    kpi("Our share of the ad war", f"{s['dem_share']:.0%}",
+        f"Last 4 weeks {s['dem_share_4w']:.0%} ({d4:+.0f} pts vs the 4 before)",
+        tone="good" if s["dem_share"] >= 0.5 else "bad",
+        help="Democratic-side share of all Dem + GOP spend in this race.")
+if R == "senate":
+    ptw = path_to_win(state_margin, sw["voted22_total"], pt)
+    with k3:
+        kpi("Where we start", fmt_margin(state_margin),
+            f"2024 president in NC · ≈{fmt_num(abs(ptw['gap']))} net votes to "
+            f"{'make up' if ptw['gap'] > 0 else 'protect'} in a midterm",
+            tone="bad" if state_margin < 0 else "good",
+            help="2024 presidential margin applied to a 2022-sized midterm electorate.")
+    res = (sw["sen26_dem"] - sw["sen26_rep"]) / sw["sen26_total"] * 100
+    with k4:
+        kpi("2026 result (unofficial)", fmt_margin(res),
+            f"{nom['dem']} {sw['sen26_dem'] / sw['sen26_total']:.1%} · {nom['rep']} {sw['sen26_rep'] / sw['sen26_total']:.1%}",
+            tone="good" if res > 0 else "bad", help=f"NCSBE precinct results file of {sw['sen26_file_date']}.")
+else:
+    lean_d = int((regions["dem_margin_pct"] > 0).sum())
+    battle = int((regions["dem_margin_pct"].abs() < 8).sum())
+    held_d = int((regions["held_by_2024"] == "Dem").sum())
+    won_d = int((regions["result26_margin_pct"] > 0).sum())
+    with k3:
+        kpi("Where we start", f"{lean_d} of 14 lean D",
+            f"By 2024 president margin · {battle} battlegrounds within 8 pts", tone="bad" if lean_d < 7 else "good")
+    with k4:
+        kpi("2026 result (unofficial)", f"D {won_d} – R {14 - won_d}",
+            f"Seats held after 2024: D {held_d} – R {14 - held_d}", tone="good" if won_d >= 7 else "bad",
+            help="NCSBE 2026 precinct results, US House contests.")
 
-s1, s2 = st.columns([7, 5], gap="medium")
-with s1, st.container(border=True):
-    chart_card_header("Weekly NC spend by side", "Each ad's NC spend spread across its delivery days · band = low–high "
-                      "of the reported spend ranges", fidelity="modeled")
-    w = load_weekly_by_side()
-    w = w[w["side_group"].isin(["Dem side", "GOP side", "Unclassified"])]
-    st.altair_chart(area_with_band(w, "week_start", "nc_spend_mid", "nc_spend_low", "nc_spend_high", "side_group",
-                                   theme=theme), width="stretch")
-    st.caption("Unclassified = advertisers not yet mapped to a side in seeds/advertiser_sides.csv.")
-with s2, st.container(border=True):
-    chart_card_header("Spend by platform", "NC-apportioned spend this cycle, with low–high range", fidelity="modeled")
-    mix = load_platform_mix()
-    st.altair_chart(ranked_bar(mix, "platform", "nc_spend_mid", theme, title="NC spend", low_col="nc_spend_low",
-                               high_col="nc_spend_high", height=180), width="stretch")
-    st.caption("Google: creatives since Jul 2025 targeting NC (multi-state ads apportioned 1/n states). "
-               "Meta: ads delivered in NC since Jul 2026 × NC delivery share.")
+# ----------------------------------------------------------------------------- House: district board
+if R == "house":
+    st.markdown("<div class='group-title'>The seats</div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        section("District by district: where we started and where we finished",
+                "Hollow dot = 2024 presidential margin on the new lines (our starting point). "
+                "Solid dot = 2026 House result. Shaded band = within 5 points.")
+        chart(district_board(regions, T))
+        flips = regions[(regions["held_by_2024"] == "Rep") & (regions["result26_margin_pct"] > 0)]
+        if len(flips):
+            source(f"Flipped from Republican to Democrat in 2026: {', '.join(flips['label'])}. "
+                   "Results are unofficial (NCSBE results file).")
 
-with st.container(border=True):
-    chart_card_header("Top advertisers in NC", "Ranked by modeled NC spend · colour = side", fidelity="modeled")
-    adv = load_advertisers()
-    st.altair_chart(ranked_bar(adv.head(15), "advertiser", "nc_spend_mid", theme, title="NC spend (mid)",
-                               low_col="nc_spend_low", high_col="nc_spend_high", color_col="side_group",
-                               color_scale=side_scale(theme)), width="stretch")
-    with st.expander("Table view"):
-        st.dataframe(adv.head(50)[["advertiser", "side_group", "platforms", "n_ads", "nc_spend_mid", "top_theme"]],
-                     hide_index=True, width="stretch",
-                     column_config={"nc_spend_mid": st.column_config.NumberColumn("NC spend (mid)", format="dollar")})
+# ----------------------------------------------------------------------------- money
+st.markdown("<div class='group-title'>The money</div>", unsafe_allow_html=True)
+c1, c2 = st.columns([7, 5], gap="medium")
+with c1, st.container(border=True):
+    section("Who is out-spending whom, week by week", "Ad spend per week on Google and Meta, by side.")
+    w = weekly_by_side(R)
+    chart(weekly_sides(w, T))
+    gop_trend = (s["gop_4w"] / s["gop_prev4w"] - 1) * 100 if s["gop_prev4w"] else 0
+    dark = went_dark(s)
+    if dark:
+        callout(f"Republicans have gone dark online since {dark}",
+                f"No Republican Google or Meta ads (≥ $1K) in this race since {dark}. Last 4 weeks: "
+                f"Democrats {fmt_money(s['dem_4w'])}, Republicans {fmt_money(s['gop_4w'])}.", tone="dem")
+    else:
+        source(f"Last 4 weeks: Democrats {fmt_money(s['dem_4w'])}, Republicans {fmt_money(s['gop_4w'])} "
+               f"({gop_trend:+.0f}% vs the 4 weeks before).")
+with c2, st.container(border=True):
+    section("Biggest spenders", "Top 10 committees and PACs in this race.")
+    top = top_advertisers(R, n=10)
+    chart(ranked_bars(top, "advertiser", "spend", T, height=320))
+
+c3, c4 = st.columns([5, 7], gap="medium")
+with c3, st.container(border=True):
+    section("Where each side puts its money", "Share of each side's spend by platform.")
+    ch = channel_by_side(R)
+    order = ch.groupby("channel")["spend"].sum().sort_values(ascending=False).index.tolist()
+    chart(side_pair_bars(ch, "channel", "share", T, order=order))
+with c4, st.container(border=True):
+    section("What the spending tells us")
+    piv = ch.pivot_table(index="channel", columns="side_group", values="share", fill_value=0)
+    items = []
+    if {"Dem side", "GOP side"} <= set(piv.columns):
+        main = piv.sum(axis=1).idxmax()
+        items.append(f"Both sides fight mainly on {main}: {piv.loc[main, 'Dem side']:.0%} of our spend, "
+                     f"{piv.loc[main, 'GOP side']:.0%} of theirs.")
+        gap = (piv["GOP side"] - piv["Dem side"]).sort_values()
+        if gap.iloc[-1] >= 0.03:
+            items.append(f"Republicans put more into {gap.index[-1]} ({piv.loc[gap.index[-1], 'GOP side']:.0%} of their "
+                         f"spend vs {piv.loc[gap.index[-1], 'Dem side']:.0%} of ours).")
+        if gap.iloc[0] <= -0.03:
+            items.append(f"We put more into {gap.index[0]} ({piv.loc[gap.index[0], 'Dem side']:.0%} vs "
+                         f"{piv.loc[gap.index[0], 'GOP side']:.0%}).")
+    if s["partisan"]:
+        ratio = s["dem"] / s["gop"] if s["gop"] else float("inf")
+        items.append(f"Across the race we spend ${ratio:.1f} for every $1 Republicans spend." if s["gop"] else
+                     "No Republican spend attributed to this race yet.")
+    t_gop = top[top["side_group"] == "GOP side"]
+    if len(t_gop):
+        items.append(f"Largest Republican spender: {t_gop.iloc[0]['advertiser']} ({fmt_money(t_gop.iloc[0]['spend'])}).")
+    bullets(items)
+    source(f"Spend is Google + Meta political ads attributed to this race, NC share only, since Jul 1, 2026 "
+           f"(midpoints of the ranges the platforms report). Not included: {fmt_money(s['other_races'])} from party "
+           f"committees, issue groups and state/local races, and {fmt_money(s['unclassified'])} in this race from "
+           f"groups we could not place on a side.")
+
+# ----------------------------------------------------------------------------- electorate & turnout
+st.markdown("<div class='group-title'>Electorate & turnout</div>", unsafe_allow_html=True)
+e1, e2 = st.columns([6, 6], gap="medium")
+with e1, st.container(border=True):
+    section("Registered voters vs. who showed up in the 2022 midterm",
+            "Light bar = registered · solid bar = voted. Statewide, by party registration.")
+    chart(registered_vs_voted(pt, T))
+    reg = pt.set_index("party")
+    t22 = sw["voted22_total"] / pt["reg22"].sum()
+    t24 = sw["pres24_total"] / sw["registered_2024"]
+    source(f"Turnout drops from {t24:.0%} in a presidential year (2024) to {t22:.0%} in a midterm (2022). "
+           f"Unaffiliated voters are the largest bloc ({reg.loc['Unaffiliated', 'reg24'] / pt['reg24'].sum():.0%} "
+           f"of {fmt_num(pt['reg24'].sum())} registered) and the least likely to vote.")
+with e2, st.container(border=True):
+    dem_t, rep_t = reg.loc["Dem", "turnout22"], reg.loc["Rep", "turnout22"]
+    if R == "senate":
+        section("Our path to win statewide")
+        if ptw["gap"] > 0:
+            callout(f"We start ≈{fmt_num(ptw['gap'])} net votes behind",
+                    f"NC voted {fmt_margin(state_margin)} for president in 2024. In a midterm-sized electorate "
+                    f"({fmt_num(sw['voted22_total'])} voters) that is the deficit to close.", tone="rep")
+        else:
+            callout(f"We start ≈{fmt_num(-ptw['gap'])} net votes ahead", "Protect the lead.", tone="dem")
+        bullets([
+            f"Turnout: {fmt_num(ptw['dems_skipped'])} registered Democrats skipped the 2022 midterm. "
+            f"Turning out {ptw['mobilize_share']:.0%} of them closes the gap on its own.",
+            f"Persuasion: about {fmt_num(ptw['una_voters'])} unaffiliated voters cast midterm ballots. "
+            f"Winning them by {ptw['una_points']:.1f} more points closes it too.",
+            f"The turnout gap is the problem: {rep_t:.0%} of registered Republicans voted in 2022 vs "
+            f"{dem_t:.0%} of registered Democrats.",
+        ])
+        source("Gap = 2024 presidential margin × 2022 turnout. Pools from NCSBE voter registration (2024) and "
+               "2022 voter history. Mixes of both levers work too; see Region Analysis for where the votes are.")
+    else:
+        section("What it takes to flip our targets",
+                "The 8 closest Republican-leaning districts by 2024 presidential margin. "
+                "Votes to flip = that deficit in a midterm-sized electorate.")
+        b = regions[regions["dem_margin_pct"] < 0].nlargest(8, "dem_margin_pct").copy()
+        b["votes_needed"] = (-b["dem_margin_pct"] / 100 * b["expected_turnout"]).clip(lower=0)
+        b["need_share"] = b["votes_needed"] / b["dems_skipped22"]
+        b = b.sort_values("dem_margin_pct", ascending=False)
+        st.dataframe(
+            b[["label", "dem_candidate", "dem_margin_pct", "votes_needed", "dems_skipped22", "need_share"]],
+            hide_index=True, width="stretch",
+            column_config={
+                "label": "District", "dem_candidate": "Our nominee",
+                "dem_margin_pct": st.column_config.NumberColumn("2024 margin", format="%+.1f"),
+                "votes_needed": st.column_config.NumberColumn("Votes to flip", format="%d"),
+                "dems_skipped22": st.column_config.NumberColumn("Dems who skipped 2022", format="%d"),
+                "need_share": st.column_config.ProgressColumn("Share of them to turn out", format="percent",
+                                                              min_value=0.0, max_value=1.0),
+            })
+        source(f"Statewide, {rep_t:.0%} of registered Republicans voted in 2022 vs {dem_t:.0%} of registered "
+               "Democrats — closing that turnout gap is the cheapest path in every district above.")

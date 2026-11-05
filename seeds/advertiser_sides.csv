@@ -1,38 +1,41 @@
-pattern,side,label,basis
+pattern,side,label,basis,race
 # Regex (case-insensitive) matched against Google advertiser name, Meta page name and Meta byline.
 # First match wins, top to bottom. Sides: us | ally_us | opponent | ally_opp | neutral.
 # "us" = Democratic US Senate nominee's campaign (Roy Cooper, 2026); "opponent" = Republican nominee (Michael Whatley).
+# race: senate | house | other (state / judicial / local) | any (works across races; resolved per ad from its text or targeting).
 # Anything unmatched is shown as "unclassified" — review data/cache/advertisers_unclassified.parquet and add rows here.
-\bcooper (for north carolina|victory fund)\b|^roy cooper$,us,Cooper campaign,Candidate committee / JFC
-\bwhatley (for senate|victory committee)\b|^michael whatley$,opponent,Whatley campaign,Candidate committee / JFC
-\bwinsenate\b,ally_us,WinSenate,Democratic Senate super PAC
-\bmajority forward\b,ally_us,Majority Forward,Senate Majority PAC affiliate (Dem)
-^hmp$|house majority (pac|forward),ally_us,House Majority PAC / Forward,Democratic House super PAC
-^dccc$|^dscc$,ally_us,DCCC / DSCC,Democratic party committee
-\bdemocrat(ic|s)\b,ally_us,Democratic party committees,Party name
-lcv victory fund|league of conservation voters,ally_us,LCV,Endorses Democrats
-^ab pac$|^ab foundation$|american bridge,ally_us,American Bridge,Democratic research / super PAC
-dmfi pac,ally_us,DMFI PAC,Democratic Majority for Israel
-nrdc action,ally_us,NRDC Action,Endorses Democrats
-edf action votes,ally_us,EDF Action Votes,Endorses Democrats
-justice democrats,ally_us,Justice Democrats,Progressive PAC
-planned parenthood votes,ally_us,Planned Parenthood Votes,Endorses Democrats
-progress (nc|north carolina) action,ally_us,Progress NC Action,Progressive advocacy
-care in action,ally_us,Care in Action,Progressive advocacy
-\bdon davis\b,ally_us,Don Davis (D),Democratic candidate (CD-1)
-earls for justice,ally_us,Anita Earls (D),Democratic candidate (NC Supreme Court)
-^slf pac$|senate leadership fund,ally_opp,Senate Leadership Fund,Republican Senate super PAC
-^clf$|congressional leadership fund,ally_opp,Congressional Leadership Fund,Republican House super PAC
-^nrcc$|^nrsc$|& nrcc,ally_opp,NRCC / NRSC,Republican party committee
-maga inc,ally_opp,MAGA Inc.,Pro-Trump super PAC
-americans for prosperity,ally_opp,Americans for Prosperity,Conservative advocacy (endorses Republicans)
-\brepublican\b|\bgop\b|^gopac,ally_opp,Republican party committees,Party name
-laurie buckhout,ally_opp,Laurie Buckhout (R),Republican candidate (CD-1)
-virginia foxx,ally_opp,Virginia Foxx (R),Republican incumbent
-friends of tim moore|^tim moore$,ally_opp,Tim Moore (R),Republican incumbent
-phil berger,ally_opp,Phil Berger (R),Republican state senate leader
-greg murphy,ally_opp,Greg Murphy (R),Republican incumbent
-restoration of america,ally_opp,Restoration of America PAC,Conservative PAC
-american action network,ally_opp,American Action Network,Republican-aligned 501(c)(4)
-american civil liberties union|\baclu\b,neutral,ACLU,Nonpartisan
-virginians for fair maps,neutral,Virginians for Fair Maps,Out-of-state ballot measure
+\bcooper (for north carolina|victory fund)\b|^roy cooper$,us,Cooper campaign,Candidate committee / JFC,senate
+\bwhatley (for senate|victory committee)\b|^michael whatley$,opponent,Whatley campaign,Candidate committee / JFC,senate
+\bwinsenate\b,ally_us,WinSenate,Democratic Senate super PAC,senate
+^hmp$|house majority (pac|forward),ally_us,House Majority PAC / Forward,Democratic House super PAC,house
+\bmajority forward\b,ally_us,Majority Forward,Senate Majority PAC affiliate (Dem),senate
+^dccc$,ally_us,DCCC,Democratic House party committee,house
+^dscc$,ally_us,DSCC,Democratic Senate party committee,senate
+\bdemocrat(ic|s)\b,ally_us,Democratic party committees,Party name,any
+lcv victory fund|league of conservation voters,ally_us,LCV,Endorses Democrats,any
+^ab pac$|^ab foundation$|american bridge,ally_us,American Bridge,Democratic research / super PAC,any
+dmfi pac,ally_us,DMFI PAC,Democratic Majority for Israel,any
+nrdc action,ally_us,NRDC Action,Endorses Democrats,any
+edf action votes,ally_us,EDF Action Votes,Endorses Democrats,any
+justice democrats,ally_us,Justice Democrats,Progressive PAC,any
+planned parenthood votes,ally_us,Planned Parenthood Votes,Endorses Democrats,any
+progress (nc|north carolina) action,ally_us,Progress NC Action,Progressive advocacy,any
+care in action,ally_us,Care in Action,Progressive advocacy,any
+\bdon davis\b,ally_us,Don Davis (D),Democratic candidate (CD-1),house
+earls for justice,ally_us,Anita Earls (D),Democratic candidate (NC Supreme Court),other
+^slf pac$|senate leadership fund,ally_opp,Senate Leadership Fund,Republican Senate super PAC,senate
+^clf$|congressional leadership fund,ally_opp,Congressional Leadership Fund,Republican House super PAC,house
+^nrcc$|& nrcc,ally_opp,NRCC,Republican House party committee,house
+^nrsc$,ally_opp,NRSC,Republican Senate party committee,senate
+maga inc,ally_opp,MAGA Inc.,Pro-Trump super PAC,any
+americans for prosperity,ally_opp,Americans for Prosperity,Conservative advocacy (endorses Republicans),any
+\brepublican\b|\bgop\b|^gopac,ally_opp,Republican party committees,Party name,any
+laurie buckhout,ally_opp,Laurie Buckhout (R),Republican candidate (CD-1),house
+virginia foxx,ally_opp,Virginia Foxx (R),Republican incumbent,house
+friends of tim moore|^tim moore$,ally_opp,Tim Moore (R),Republican incumbent,house
+phil berger,ally_opp,Phil Berger (R),Republican state senate leader,other
+greg murphy,ally_opp,Greg Murphy (R),Republican incumbent,house
+restoration of america,ally_opp,Restoration of America PAC,Conservative PAC,any
+american action network,ally_opp,American Action Network,Republican-aligned 501(c)(4),any
+american civil liberties union|\baclu\b,neutral,ACLU,Nonpartisan,any
+virginians for fair maps,neutral,Virginians for Fair Maps,Out-of-state ballot measure,any

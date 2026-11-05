@@ -1,109 +1,153 @@
 """
-Opponent Tracker (UI_Design.md §6.3): what is the other side spending, where, on what message,
-and what changed recently?
+Opponent Tracker: what Republicans are spending in this race, on which platforms, with which
+messages, aimed at whom — and their latest ads.
 """
 
 import pandas as pd
 import streamlit as st
 
 from campaign_intel.data.loaders import (
+    audience_by_side,
+    channel_by_side,
     fmt_money,
-    load_advertisers,
-    load_alerts,
     load_creatives,
-    load_manifest,
-    load_sov_weekly,
-    load_weekly_by_side,
+    new_activity,
+    snapshot_date,
+    spend_summary,
+    themes_by_side,
+    top_advertisers,
+    weekly_by_channel,
+    went_dark,
 )
+from campaign_intel.config import RACES
 from campaign_intel.processing.themes import theme_labels
-from campaign_intel.ui.components import chart_card_header, creative_card, kpi_card
-from campaign_intel.ui.topbar import render_topbar
-from campaign_intel.viz.charts import area_with_band, ranked_bar, share_of_voice_line, side_scale
+from campaign_intel.state import race, theme
+from campaign_intel.ui.components import chart, ad_card, bullets, kpi, page_header, section, source
+from campaign_intel.viz.charts import age_reach, channel_weeks, ranked_bars, side_pair_bars, theme_compare
 
-render_topbar("Opponent Tracker & Creative Ledger")
-theme = st.session_state.get("theme", "dark")
+R, T = race(), theme()
 labels = theme_labels()
-snap = pd.Timestamp(load_manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
+s = spend_summary(R)
+snap = snapshot_date()
+gop_adv = top_advertisers(R, "GOP side", n=12)
+gop_adv = gop_adv[gop_adv["spend"] >= 1000]
+cre = load_creatives(R, "GOP side")
+ch = channel_by_side(R)
+gop_ch = ch[ch["side_group"] == "GOP side"].sort_values("spend", ascending=False)
 
-w = load_weekly_by_side()
-gop_w = w[w["side_group"] == "GOP side"].sort_values("week_start")
-cre = load_creatives("GOP side", limit=5000)
-adv = load_advertisers()
-gop_adv = adv[adv["side_group"] == "GOP side"]
+page_header(f"Opponent Tracker · {RACES[R]['label']}",
+            "What Republicans are spending, where, on which messages, and who they are trying to reach.")
 
-c1, c2, c3, c4 = st.columns(4, gap="medium")
-with c1:
-    last4 = gop_w.tail(4)["nc_spend_mid"].sum()
-    prev4 = gop_w.iloc[-8:-4]["nc_spend_mid"].sum()
-    kpi_card("GOP-side NC spend, last 4 weeks", fmt_money(last4),
-             delta=f"{(last4 / prev4 - 1) * 100:+.0f}% vs prior 4" if prev4 else None, good_direction="down",
-             fidelity="modeled", band="Google + Meta, NC-apportioned", spark_data=gop_w["nc_spend_mid"].tail(8).tolist())
-with c2:
-    new48 = cre[cre["start"] >= snap - pd.Timedelta(days=2)]
+k1, k2, k3, k4 = st.columns(4, gap="small")
+with k1:
+    kpi("Republican spend this race", fmt_money(s["gop"]), f"vs our {fmt_money(s['dem'])} · since Jul 1",
+        tone="bad" if s["gop"] > s["dem"] else "neutral")
+with k2:
+    chg = (s["gop_4w"] / s["gop_prev4w"] - 1) * 100 if s["gop_prev4w"] else 0
+    dark = went_dark(s)
+    kpi("Last 4 weeks", fmt_money(s["gop_4w"]),
+        f"No ads since {dark} — they've gone dark" if dark else f"{chg:+.0f}% vs the 4 weeks before",
+        tone="good" if dark or chg <= 0 else "bad")
+with k3:
+    top_ch = gop_ch.iloc[0] if len(gop_ch) else None
+    kpi("Their top platform", top_ch["channel"] if top_ch is not None else "—",
+        f"{top_ch['share']:.0%} of Republican spend" if top_ch is not None else "")
+with k4:
     new7 = cre[cre["start"] >= snap - pd.Timedelta(days=7)]
-    kpi_card("New GOP-side ads", f"{len(new7):,} in 7 days", delta=f"{len(new48):,} in last 48h", good_direction="down",
-             fidelity="observed", band="Ads whose delivery started in the window")
-with c3:
-    flat = cre[cre["start"] >= snap - pd.Timedelta(days=28)].explode("message_themes").dropna(subset=["message_themes"])
-    ts = flat.groupby("message_themes")["nc_spend_mid"].sum().sort_values(ascending=False)
-    top_t = labels.get(ts.index[0], ts.index[0]) if len(ts) else "—"
-    kpi_card("Dominant GOP message (28 days)", top_t, delta=f"{ts.iloc[0] / ts.sum():.0%} of themed spend" if len(ts) else None,
-             good_direction="neutral", fidelity="modeled", band="Keyword theme classifier on Meta ad text")
-with c4:
-    top_a = gop_adv.iloc[0] if len(gop_adv) else None
-    kpi_card("Biggest GOP-side spender", top_a["advertiser"] if top_a is not None else "—",
-             delta=fmt_money(top_a["nc_spend_mid"]) if top_a is not None else None, good_direction="neutral",
-             fidelity="modeled", band="NC-apportioned, this cycle")
+    kpi("New Republican ads, last 7 days", f"{new7['ad_id'].nunique():,}",
+        f"from {new7['advertiser'].nunique()} advertisers" if len(new7) else "No new flights",
+        tone="bad" if len(new7) else "neutral")
 
-st.write("")
-h1, h2 = st.columns([7, 5], gap="medium")
-with h1, st.container(border=True):
-    chart_card_header("GOP-side vs Dem-side weekly spend", "Modeled NC spend, low–high band", fidelity="modeled")
-    st.altair_chart(area_with_band(w[w["side_group"].isin(["Dem side", "GOP side"])], "week_start", "nc_spend_mid",
-                                   "nc_spend_low", "nc_spend_high", "side_group", theme=theme), width="stretch")
-with h2, st.container(border=True):
-    chart_card_header("Dem share of voice", "Dem-side share of partisan NC spend per week (50% = parity)", fidelity="modeled")
-    st.altair_chart(share_of_voice_line(load_sov_weekly(), theme), width="stretch")
+# ----------------------------------------------------------------------------- where the money goes
+st.markdown("<div class='group-title'>Where their money goes</div>", unsafe_allow_html=True)
+c1, c2 = st.columns([7, 5], gap="medium")
+with c1, st.container(border=True):
+    section("Republican spend per week, by platform")
+    wk = weekly_by_channel(R, "GOP side")
+    if len(wk):
+        chart(channel_weeks(wk, T))
+    else:
+        st.caption("No Republican spend attributed to this race.")
+with c2, st.container(border=True):
+    section("Platform mix: them vs us", "Share of each side's spend by platform.")
+    order = ch.groupby("channel")["spend"].sum().sort_values(ascending=False).index.tolist()
+    chart(side_pair_bars(ch, "channel", "share", T, order=order))
 
-g1, g2 = st.columns([7, 5], gap="medium")
-with g1, st.container(border=True):
-    chart_card_header("GOP-side creative library", "Real ads from the Meta Ad Library and Google Transparency Report · "
-                      "newest first", fidelity="observed")
-    f1, f2, f3, f4 = st.columns([1.2, 1.4, 1, 1], vertical_alignment="bottom")
-    themes_avail = sorted({t for th in cre["message_themes"] for t in th})
-    tf = f1.selectbox("Theme", ["All"] + themes_avail, format_func=lambda x: labels.get(x, x), key="opp_theme")
-    af = f2.selectbox("Advertiser", ["All"] + gop_adv["advertiser"].head(30).tolist(), key="opp_adv")
+c3, c4 = st.columns([6, 6], gap="medium")
+with c3, st.container(border=True):
+    section("Who is paying for it", "Top Republican committees and PACs in this race.")
+    if len(gop_adv):
+        chart(ranked_bars(gop_adv, "advertiser", "spend", T, height=max(160, 30 * len(gop_adv))))
+with c4, st.container(border=True):
+    section("New activity, last 7 days", "Republican advertisers that launched ads in the past week.")
+    na = new_activity(R)
+    if na.empty:
+        st.caption("No new Republican ads in the last 7 days of the snapshot.")
+    else:
+        st.dataframe(na.head(10), hide_index=True, width="stretch",
+                     column_config={"advertiser": "Advertiser", "new_ads": "New ads",
+                                    "spend": st.column_config.NumberColumn("Est. NC spend", format="dollar"),
+                                    "platforms": "Platform"})
+    source(f"Snapshot through {snap:%b %d, %Y}. Spend for new ads is what the platforms have reported so far.")
+
+# ----------------------------------------------------------------------------- message & audience
+st.markdown("<div class='group-title'>Their message and audience</div>", unsafe_allow_html=True)
+m1, m2 = st.columns([6, 6], gap="medium")
+th = themes_by_side(R)
+with m1, st.container(border=True):
+    section("What they talk about", "Share of each side's Facebook / Instagram spend whose ad text mentions each topic.")
+    if len(th):
+        chart(theme_compare(th, T))
+        p = th.pivot_table(index="theme", columns="side_group", values="share", fill_value=0)
+        if {"GOP side", "Dem side"} <= set(p.columns):
+            gap = (p["GOP side"] - p["Dem side"]).sort_values(ascending=False)
+            items = [f"Their top topic: {p['GOP side'].idxmax()} ({p['GOP side'].max():.0%} of their spend)."]
+            if gap.iloc[0] > 0.02:
+                items.append(f"Biggest message gap: they push {gap.index[0]} {gap.iloc[0] * 100:.0f} pts more than we do.")
+            if gap.iloc[-1] < -0.02:
+                items.append(f"We own {gap.index[-1]} ({p.loc[gap.index[-1], 'Dem side']:.0%} of our spend vs "
+                             f"{p.loc[gap.index[-1], 'GOP side']:.0%} of theirs).")
+            bullets(items)
+    else:
+        st.caption("No ad text available for this race.")
+    source("Keyword topic classifier on ad text. Google ads carry no text, so this covers Meta only.")
+with m2, st.container(border=True):
+    section("Who their ads reach", "Share of each side's Facebook / Instagram impressions in NC by age.")
+    au = audience_by_side(R)
+    if len(au):
+        chart(age_reach(au, T))
+        g = au[au["side_group"] == "GOP side"]
+        if len(g):
+            older = g[g["age"].isin(["55-64", "65+"])]["share"].sum()
+            women = g[g["gender"] == "Women"]["share"].sum()
+            d = au[au["side_group"] == "Dem side"]
+            d_older = d[d["age"].isin(["55-64", "65+"])]["share"].sum()
+            bullets([f"{older:.0%} of their impressions reach people 55+ (ours: {d_older:.0%}).",
+                     f"{women:.0%} of their impressions reach women."])
+    source("Meta Ad Library delivery breakdowns (who actually saw the ads), weighted by impressions.")
+
+# ----------------------------------------------------------------------------- ad library
+st.markdown("<div class='group-title'>Their latest ads</div>", unsafe_allow_html=True)
+with st.container(border=True):
+    f1, f2, f3 = st.columns([2, 2, 2], vertical_alignment="bottom")
+    themes_avail = sorted({t for ts in cre["message_themes"] for t in ts})
+    tf = f1.selectbox("Topic", ["All"] + themes_avail, format_func=lambda x: labels.get(x, x), key="opp_theme")
+    af = f2.selectbox("Advertiser", ["All"] + gop_adv["advertiser"].tolist(), key="opp_adv")
     pf = f3.selectbox("Platform", ["All", "Meta", "Google"], key="opp_plat")
-    big = f4.toggle("Hide ads < $1k", value=True, key="opp_big")
-    view = cre[cre["spend_high"] >= 1000] if big else cre
+    small = st.toggle("Include small ads (under $1K)", value=False, key="opp_small")
+    view = cre if small else cre[cre["spend_high"] >= 1000]
     if tf != "All":
-        view = view[view["message_themes"].map(lambda th: tf in th)]
+        view = view[view["message_themes"].map(lambda ts: tf in ts)]
     if af != "All":
         view = view[view["advertiser"] == af]
     if pf != "All":
         view = view[view["platform"] == pf]
-    st.caption(f"{len(view):,} ads match · showing 12")
-    for r in view.head(12).itertuples():
-        band = (f"≥ ${r.spend_low:,.0f}" if r.open_ended else f"${r.spend_low:,.0f} – ${r.spend_high:,.0f}")
-        nc = f" · NC ≈ {r.nc_share:.0%}" if pd.notna(r.nc_share) and r.nc_share < 0.99 else ""
-        body = r.body or f"[{r.format.title()} ad — open in the Google Ads Transparency Report to view the creative]"
-        creative_card(advertiser=r.advertiser, date_str=f"{r.start:%b %d, %Y}", body=body, spend_band=band + nc,
-                      top_demo=r.top_demo, themes=[labels.get(t, t) for t in r.message_themes],
-                      url=r.url or "https://www.facebook.com/ads/library/", platform=r.platform)
-with g2, st.container(border=True):
-    chart_card_header("GOP-side committees & PACs", "Modeled NC spend this cycle", fidelity="modeled")
-    st.altair_chart(ranked_bar(gop_adv.head(12), "advertiser", "nc_spend_mid", theme, title="NC spend",
-                               low_col="nc_spend_low", high_col="nc_spend_high", color_col="side_group",
-                               color_scale=side_scale(theme)), width="stretch")
-    st.dataframe(gop_adv.head(25)[["advertiser", "platforms", "n_ads", "active_7d", "nc_spend_mid", "top_theme"]]
-                 .assign(top_theme=lambda d: d["top_theme"].map(lambda x: labels.get(x, x))),
-                 hide_index=True, width="stretch",
-                 column_config={"advertiser": "Advertiser", "n_ads": "Ads", "active_7d": "Active 7d",
-                                "nc_spend_mid": st.column_config.NumberColumn("NC spend", format="dollar"),
-                                "top_theme": "Top theme"})
-    st.markdown("##### 🚨 Recent activity alerts")
-    al = load_alerts()
-    if al.empty:
-        st.caption("No GOP-side alerts in the last 7 days of the snapshot.")
-    for r in al.head(6).itertuples():
-        st.markdown(f"{'🔴' if r.severity == 'high' else '🟠'} {r.text}")
+    view = view.drop_duplicates(subset=["advertiser", "body"]) if len(view) else view
+    st.caption(f"{len(view):,} ads · newest first · showing up to 12")
+    cols = st.columns(2, gap="medium")
+    for i, r in enumerate(view.head(12).itertuples()):
+        band = f"≥ ${r.spend_low:,.0f}" if r.open_ended else f"${r.spend_low:,.0f}–${r.spend_high:,.0f}"
+        with cols[i % 2]:
+            ad_card(r.advertiser, f"{r.start:%b %d}", r.body, band, r.platform, r.url,
+                    audience=r.top_audience if isinstance(r.top_audience, str) else None,
+                    themes=[labels.get(t, t) for t in r.message_themes])

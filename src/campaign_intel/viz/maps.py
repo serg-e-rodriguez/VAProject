@@ -76,7 +76,8 @@ def choropleth(unit_type: str, df_metrics: pd.DataFrame, metric_col: str, metric
 
     if scale == "diverging":
         m = domain_max or max(5.0, float(df_metrics[metric_col].abs().quantile(0.95)))
-        color_scale = alt.Scale(domain=[-m, 0, m], range=[t["rep"], t["border"], t["dem"]], clamp=True)
+        mid = "#ECEAF0" if theme == "light" else "#4A4F5C"
+        color_scale = alt.Scale(domain=[-m, 0, m], range=[t["rep"], mid, t["dem"]], clamp=True, interpolate="lab")
     else:
         lo = "#E8EEFC" if theme == "light" else "#232B3D"
         color_scale = alt.Scale(range=[lo, t["dem"]], zero=False, nice=False)

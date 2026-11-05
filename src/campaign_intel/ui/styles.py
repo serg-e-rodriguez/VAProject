@@ -1,6 +1,6 @@
 """
 Design tokens and dynamic CSS injection for Light and Dark modes per UI_Design.md.
-Provides authoritative styling, typography, component resets, and dark mode themes.
+Light and dark tokens, component styles, and light-mode repaints of native widgets.
 """
 
 import streamlit as st
@@ -90,399 +90,343 @@ def get_tokens(theme: str = "dark") -> dict:
 
 
 def inject(theme: str = "dark"):
-    """
-    Injects custom CSS adhering strictly to UI_Design.md tokens.
-    Guarantees Material Symbols icons render as glyphs without text collision.
-    """
+    """Injects the design tokens as CSS variables plus the app's component styles."""
     t = get_tokens(theme)
     css = f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap');
-    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
-    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
     :root {{
-        --bg-canvas: {t['bg_canvas']};
         --bg-frame: {t['bg_frame']};
         --surface: {t['surface']};
         --surface-raised: {t['surface_raised']};
         --border: {t['border']};
-        --gridline: {t['gridline']};
         --text-primary: {t['text_primary']};
         --text-secondary: {t['text_secondary']};
         --text-muted: {t['text_muted']};
         --accent: {t['accent']};
         --accent-soft: {t['accent_soft']};
         --dem: {t['dem']};
-        --dem-soft: {t['dem_soft']};
         --rep: {t['rep']};
-        --rep-soft: {t['rep_soft']};
         --swing: {t['swing']};
-        --neutral-series: {t['neutral_series']};
-        --radius-card: {t['radius_card']};
-        --radius-control: {t['radius_control']};
-        --radius-pill: {t['radius_pill']};
-        --shadow-card: {t['shadow_card']};
-        --shadow-pop: {t['shadow_pop']};
+        --dem-bg: {t['pill_up_bg']};
+        --rep-bg: {t['pill_down_bg']};
+        --neutral-bg: {t['pill_neutral_bg']};
+        --radius: 14px;
+        --shadow: {t['shadow_card']};
     }}
 
-    /* Global Typography - NEVER override font-family with [class*="st-"] */
-    html, body, .stApp, p, label, h1, h2, h3, h4, h5, h6, input, textarea, select {{
+    html, body, .stApp, p, label, li, h1, h2, h3, h4, h5, h6, input, textarea, select {{
         font-family: 'Mulish', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     }}
-
-    /* CRITICAL: Explicitly isolate and protect Material Symbols & Icons font family */
-    [data-testid="stIconMaterial"],
-    [data-testid="stIcon"],
-    .material-symbols-rounded,
-    .material-symbols-outlined,
-    .material-icons,
-    [class*="material-symbols"],
-    [class*="material-icons"],
-    span[data-testid="stIconMaterial"] {{
-        font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', 'Material Icons' !important;
-        font-weight: normal !important;
-        font-style: normal !important;
-        font-size: 20px !important;
-        line-height: 1 !important;
-        letter-spacing: normal !important;
-        text-transform: none !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        white-space: nowrap !important;
-        word-wrap: normal !important;
-        direction: ltr !important;
-        -webkit-font-feature-settings: 'liga' 1 !important;
-        font-feature-settings: 'liga' 1 !important;
-        -webkit-font-smoothing: antialiased !important;
-        vertical-align: middle !important;
+    .stApp {{ background-color: var(--bg-frame) !important; color: var(--text-primary) !important; }}
+    header[data-testid="stHeader"] {{ background: transparent !important; }}
+    .main .block-container, [data-testid="stMainBlockContainer"] {{
+        max-width: 1360px !important; padding-top: 2.2rem !important; padding-bottom: 3rem !important;
     }}
 
-    /* Application Canvas & Dark Frame */
-    .stApp {{
-        background-color: var(--bg-frame) !important;
-        color: var(--text-primary) !important;
-    }}
-
-    header[data-testid="stHeader"] {{
-        background-color: var(--bg-frame) !important;
-    }}
-
-    /* Limit maximum container width to 1440px per UI design spec §2 */
-    .main .block-container {{
-        max-width: 1440px !important;
-        padding-top: 1.2rem !important;
-        padding-bottom: 2.5rem !important;
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-    }}
-
-    /* Sidebar Styling & Clean Alignment */
+    /* Sidebar */
     section[data-testid="stSidebar"] {{
-        background-color: var(--surface) !important;
-        border-right: 1px solid var(--border) !important;
+        background-color: var(--surface) !important; border-right: 1px solid var(--border) !important;
     }}
-
-    section[data-testid="stSidebar"] .stMarkdown {{
-        color: var(--text-primary) !important;
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{ padding-top: 1.2rem; }}
+    .brand {{ font-size: 15px; font-weight: 800; color: var(--text-primary); line-height: 1.25; margin-bottom: 2px; }}
+    .brand small {{ display: block; font-size: 11.5px; font-weight: 600; color: var(--text-muted); margin-top: 3px; }}
+    .side-label {{ font-size: 11px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase;
+        color: var(--text-muted); margin: 18px 0 6px; }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a {{
+        border-radius: 10px; padding: 6px 10px; margin: 1px 0;
     }}
-
-    /* Sidebar Navigation Links Alignment */
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a {{
-        display: flex !important;
-        align-items: center !important;
-        gap: 12px !important;
-        padding: 8px 14px !important;
-        border-radius: var(--radius-control) !important;
-        color: var(--text-primary) !important;
-        font-size: 14px !important;
-        font-weight: 500 !important;
-        margin-bottom: 4px !important;
-        text-decoration: none !important;
-        transition: background-color 0.15s ease !important;
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a p {{ font-size: 14px; font-weight: 600; }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a[aria-current="page"],
+    section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"][aria-current="page"] {{
+        background: var(--accent-soft) !important;
     }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a[aria-current="page"] p {{ color: var(--accent) !important; }}
+    .subnav {{ margin: -2px 0 4px 34px; padding-left: 10px; border-left: 2px solid var(--border);
+        font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }}
+    .subnav b {{ color: var(--text-primary); }}
+    .side-foot {{ font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }}
 
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a:hover {{
-        background-color: var(--accent-soft) !important;
-        color: var(--accent) !important;
-    }}
+    /* Page header */
+    .page-head h1 {{ font-size: 28px; font-weight: 800; margin: 0; padding: 0; color: var(--text-primary); line-height: 1.2; }}
+    .page-sub {{ font-size: 14px; color: var(--text-secondary); margin-top: 4px; }}
+    .page-head {{ margin-bottom: 18px; }}
 
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a[aria-current="page"] {{
-        background-color: var(--accent) !important;
-        color: #FFFFFF !important;
-        font-weight: 700 !important;
-    }}
-
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] li a[aria-current="page"] [data-testid="stIconMaterial"] {{
-        color: #FFFFFF !important;
-    }}
-
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] span[data-testid="stIconMaterial"] {{
-        min-width: 24px !important;
-        width: 24px !important;
-        height: 24px !important;
-        flex-shrink: 0 !important;
-        overflow: hidden !important;
-        margin-right: 6px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-    }}
-
-    /* Modern Card Container */
+    /* Cards = bordered containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {{
-        background-color: var(--surface) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-card) !important;
-        box-shadow: var(--shadow-card) !important;
-        padding: 1.25rem !important;
-        margin-bottom: 1rem !important;
-        color: var(--text-primary) !important;
+        background-color: var(--surface) !important; border: 1px solid var(--border) !important;
+        border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
     }}
 
-    /* KPI Value styling with tabular-nums */
-    .kpi-card {{
-        background-color: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-card);
-        padding: 16px 20px;
-        box-shadow: var(--shadow-card);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        min-height: 110px;
-    }}
+    /* KPI tiles */
+    .kpi {{ background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 14px 18px; min-height: 112px; box-shadow: var(--shadow); }}
+    .kpi-label {{ font-size: 12px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;
+        letter-spacing: .5px; }}
+    .kpi-value {{ font-size: 26px; font-weight: 800; color: var(--text-primary); margin-top: 6px;
+        font-variant-numeric: tabular-nums; line-height: 1.15; }}
+    .kpi-value.dem {{ color: var(--dem); }}
+    .kpi-value.rep {{ color: var(--rep); }}
+    .kpi-sub {{ font-size: 12.5px; color: var(--text-secondary); margin-top: 6px; line-height: 1.4; }}
 
-    .kpi-header {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-    }}
+    /* Section headers inside cards */
+    .sec {{ margin-bottom: 8px; }}
+    .sec-title {{ font-size: 16px; font-weight: 800; color: var(--text-primary); }}
+    .sec-sub {{ font-size: 13px; color: var(--text-secondary); margin-top: 2px; line-height: 1.45; }}
+    .source {{ font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.45; }}
+    .group-title {{ font-size: 13px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
+        color: var(--text-muted); margin: 26px 0 10px; }}
 
-    .kpi-label {{
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }}
+    /* Callouts */
+    .callout {{ border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 10px;
+        padding: 12px 16px; margin: 6px 0 10px; }}
+    .callout.dem {{ border-left-color: var(--dem); background: var(--dem-bg); }}
+    .callout.rep {{ border-left-color: var(--rep); background: var(--rep-bg); }}
+    .callout-title {{ font-size: 14.5px; font-weight: 800; color: var(--text-primary); }}
+    .callout-body {{ font-size: 13px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }}
+    ul.why {{ margin: 4px 0 4px 2px; padding-left: 18px; }}
+    ul.why li {{ font-size: 13.5px; color: var(--text-primary); margin-bottom: 6px; line-height: 1.45; }}
 
-    .kpi-main {{
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 4px 8px;
-    }}
+    /* Pills */
+    .pill {{ display: inline-block; font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 999px;
+        background: var(--neutral-bg); color: var(--text-secondary); margin-right: 6px; }}
+    .pill.dem {{ background: var(--dem-bg); color: var(--dem); }}
+    .pill.rep {{ background: var(--rep-bg); color: var(--rep); }}
 
-    .kpi-value {{
-        font-size: 24px;
-        font-weight: 800;
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-        line-height: 1.2;
-    }}
+    /* Region header */
+    .region-head {{ display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 2px 0 12px; }}
+    .region-head h2 {{ font-size: 22px; font-weight: 800; margin: 0; padding: 0; color: var(--text-primary); }}
 
-    .kpi-delta-pill {{
-        font-size: 11px;
-        font-weight: 700;
-        padding: 2px 8px;
-        border-radius: var(--radius-pill);
-        display: inline-flex;
-        align-items: center;
-    }}
+    /* Ad cards */
+    .adcard {{ border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
+        background: var(--surface); }}
+    .adcard-head {{ display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; color: var(--text-primary); }}
+    .adcard-head span {{ font-size: 12px; color: var(--text-muted); white-space: nowrap; }}
+    .adcard-body {{ font-size: 13px; color: var(--text-primary); margin: 6px 0; line-height: 1.5; white-space: pre-line; }}
+    .adcard-tags .tag {{ display: inline-block; font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; background: var(--rep-bg); color: var(--rep);
+        margin-right: 4px; }}
+    .adcard-foot {{ display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin-top: 6px; }}
+    .adcard-foot a {{ color: var(--accent); text-decoration: none; font-weight: 700; margin-left: auto; }}
 
-    .kpi-footer {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-top: 6px;
-        font-size: 12px;
-        color: var(--text-muted);
-    }}
+    /* Inputs */
+    div[data-baseweb="select"] > div, input {{ border-radius: 10px !important; }}
+    button[kind="primary"] {{ background-color: var(--accent) !important; border: none !important; color: #fff !important; }}
 
-    /* Fidelity Badges */
-    .fidelity-badge {{
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.6px;
-        padding: 2px 7px;
-        border-radius: var(--radius-pill);
-        display: inline-block;
-    }}
-
-    .badge-observed {{
-        background-color: {t['badge_observed_bg']};
-        color: {t['badge_observed_text']};
-    }}
-
-    .badge-aggregated {{
-        background-color: {t['badge_aggregated_bg']};
-        color: {t['badge_aggregated_text']};
-    }}
-
-    .badge-modeled {{
-        background-color: {t['badge_modeled_bg']};
-        color: {t['badge_modeled_text']};
-    }}
-
-    .badge-sample {{
-        background-color: {t['badge_sample_bg']};
-        color: {t['badge_sample_text']};
-    }}
-
-    /* Model Ribbon */
-    .topbar-title {{ margin: 0; font-size: 17px; font-weight: 800; color: var(--text-primary);
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    .fresh-chip {{ display: inline-block; font-size: 11px; font-weight: 600; color: var(--text-secondary);
-        background: var(--accent-soft); border: 1px solid var(--border); border-radius: 999px;
-        padding: 6px 10px; white-space: nowrap; cursor: help; }}
-    .fresh-chip.stale {{ background: rgba(224,72,72,0.12); }}
-    .insight {{ border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px;
-        border-radius: 8px; margin-bottom: 10px; font-size: 13px; color: var(--text-primary); }}
-    .insight.dem {{ border-left-color: var(--dem); background: rgba(91,141,239,0.10); }}
-    .insight.rep {{ border-left-color: var(--rep); background: rgba(240,99,99,0.10); }}
-    .insight b {{ font-weight: 700; }}
-    .insight .sub {{ display: block; color: var(--text-secondary); font-size: 12px; margin-top: 3px; }}
-    .model-ribbon {{
-        background-color: rgba(34, 160, 107, 0.12);
-        border: 1px solid rgba(43, 181, 122, 0.35);
-        color: var(--accent);
-        border-radius: var(--radius-control);
-        padding: 8px 16px;
-        font-size: 13px;
-        font-weight: 600;
-        margin-bottom: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }}
-
-    /* Vega-Lite Tooltip restyling per §4.5 */
+    /* Vega tooltip */
     #vg-tooltip-element {{
-        background-color: var(--surface-raised) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: 10px !important;
-        color: var(--text-primary) !important;
-        box-shadow: var(--shadow-pop) !important;
-        font-family: 'Mulish', sans-serif !important;
-        font-size: 12px !important;
-        padding: 8px 12px !important;
-        z-index: 10000 !important;
+        background-color: var(--surface-raised) !important; border: 1px solid var(--border) !important;
+        border-radius: 10px !important; color: var(--text-primary) !important; font-family: 'Mulish', sans-serif !important;
+        font-size: 12px !important; padding: 8px 12px !important;
     }}
+    #vg-tooltip-element table tr td.key {{ color: var(--text-secondary) !important; }}
+    #vg-tooltip-element table tr td.value {{ color: var(--text-primary) !important; font-weight: 700 !important; }}
 
-    #vg-tooltip-element table tr td.key {{
-        color: var(--text-secondary) !important;
-        font-weight: 500 !important;
-    }}
-
-    #vg-tooltip-element table tr td.value {{
-        color: var(--text-primary) !important;
-        font-weight: 700 !important;
-    }}
-
-    /* Custom Top Bar */
-    .topbar-container {{
-        background-color: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-card);
-        padding: 12px 20px;
-        margin-bottom: 20px;
-        box-shadow: var(--shadow-card);
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-    }}
-
-    /* Button and Popover Sizing Fixes */
-    button[data-testid="stPopoverButton"] {{
-        border-radius: var(--radius-control) !important;
-        border: 1px solid var(--border) !important;
-        background-color: var(--surface) !important;
-        color: var(--text-primary) !important;
-        min-height: 38px !important;
-        max-height: 40px !important;
-        height: 40px !important;
-        padding: 0 10px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        gap: 6px !important;
-        overflow: hidden !important;
-        box-sizing: border-box !important;
-        white-space: nowrap !important;
-    }}
-
-    button[data-testid="stPopoverButton"] p,
-    button[data-testid="stPopoverButton"] span {{
-        font-size: 13px !important;
-        font-weight: 600 !important;
-        margin: 0 !important;
-        white-space: nowrap !important;
-    }}
-
-    button[data-testid="stPopoverButton"] [data-testid="stIconMaterial"],
-    button[data-testid="stPopoverButton"] svg {{
-        font-size: 16px !important;
-        width: 16px !important;
-        height: 16px !important;
-        line-height: 1 !important;
-        flex-shrink: 0 !important;
-    }}
-
-    /* Popover Content Styling */
-    div[data-testid="stPopoverBody"] {{
-        background-color: var(--surface-raised) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-card) !important;
-        color: var(--text-primary) !important;
-        box-shadow: var(--shadow-pop) !important;
-    }}
-
-    /* Top right button sizing */
-    div[data-testid="stButton"] > button {{
-        border-radius: var(--radius-control) !important;
-        height: 40px !important;
-        padding: 0 12px !important;
-        font-size: 13px !important;
-        font-weight: 600 !important;
-        box-sizing: border-box !important;
-        white-space: nowrap !important;
-    }}
-
-    button[kind="primary"] {{
-        background-color: var(--accent) !important;
-        border-radius: var(--radius-control) !important;
-        border: none !important;
-        font-weight: 700 !important;
-        color: #FFFFFF !important;
-    }}
-
-    /* Dark Mode Dropdowns, Inputs, and Segmented Controls */
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div,
-    input, select, textarea {{
-        background-color: var(--surface) !important;
-        border-color: var(--border) !important;
-        color: var(--text-primary) !important;
-        border-radius: var(--radius-control) !important;
-    }}
-
-    div[data-testid="stSegmentedControl"] {{
-        background-color: var(--surface) !important;
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-control) !important;
-    }}
-
-    /* Data table header & styling */
-    div[data-testid="stDataFrame"],
-    div[data-testid="stDataEditor"] {{
-        border: 1px solid var(--border) !important;
-        border-radius: var(--radius-control) !important;
-        background-color: var(--surface) !important;
-    }}
+    div[data-testid="stDataFrame"] {{ border-radius: 10px !important; }}
+    {_light_overrides(t) if theme.lower() == "light" else ""}
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
+
+
+def _light_overrides(t: dict) -> str:
+    """
+    Streamlit's native theme is fixed to dark in .streamlit/config.toml and cannot be switched
+    from Python, so in light mode every native widget still ships dark-theme colours. This layer
+    repaints them with the light tokens. Glide dataframes draw on a canvas from the JS theme, so
+    they are colour-inverted (hue-preserving) instead.
+    """
+    return f"""
+    /* ---------- Light-mode overrides for native (dark-themed) Streamlit widgets ---------- */
+
+    /* Sidebar navigation */
+    section[data-testid="stSidebar"] [data-testid="stNavSectionHeader"],
+    section[data-testid="stSidebar"] [data-testid="stNavSectionHeader"] p {{
+        color: {t['text_muted']} !important;
+        font-weight: 700 !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] p,
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] span {{
+        color: {t['text_primary']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] [data-testid="stIconMaterial"] {{
+        color: {t['text_secondary']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover p,
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover span {{
+        color: {t['accent']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"][aria-current="page"] p,
+    section[data-testid="stSidebar"] [data-testid="stSidebarNavLink"][aria-current="page"] span {{
+        color: #FFFFFF !important;
+    }}
+    [data-testid="stSidebarCollapseButton"] span,
+    [data-testid="stExpandSidebarButton"] span,
+    header[data-testid="stHeader"] [data-testid="stIconMaterial"] {{
+        color: {t['text_secondary']} !important;
+    }}
+
+    /* Custom sidebar nav (st.page_link) */
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] p,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] span {{
+        color: {t['text_primary']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] [data-testid="stIconMaterial"] {{
+        color: {t['text_secondary']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a[aria-current="page"] p,
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a[aria-current="page"] span {{
+        color: {t['accent']} !important;
+    }}
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {{
+        background-color: {t['bg_frame']} !important;
+    }}
+
+    .stApp [data-testid="stSelectbox"] div[value], .stApp [data-testid="stSelectbox"] span,
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+        color: {t['text_secondary']} !important;
+    }}
+    .stApp [data-testid="stSelectbox"] div[value],
+    .stApp [data-testid="stSelectbox"] input {{
+        color: {t['text_primary']} !important;
+        -webkit-text-fill-color: {t['text_primary']} !important;
+    }}
+
+    /* Widget labels, slider ticks, tooltip icons */
+    .stApp [data-testid="stWidgetLabel"],
+    .stApp [data-testid="stWidgetLabel"] p {{
+        color: {t['text_primary']} !important;
+    }}
+    .stApp [data-testid="stSliderTickBar"] p {{
+        color: {t['text_secondary']} !important;
+    }}
+    .stApp [data-testid="stTooltipIcon"] svg {{
+        color: {t['text_muted']} !important;
+    }}
+
+    /* Select boxes, multiselects, number & text inputs */
+    .stApp [data-testid="stSelectbox"] div,
+    .stApp [data-testid="stMultiSelect"] div:not([data-testid="stMultiSelectTagsContainer"]),
+    .stApp [data-testid="stNumberInputContainer"],
+    .stApp [data-testid="stNumberInputContainer"] div,
+    .stApp [data-testid="stTextInputRootElement"],
+    .stApp [data-testid="stTextInputRootElement"] div {{
+        background-color: {t['surface']} !important;
+        color: {t['text_primary']} !important;
+    }}
+    .stApp [data-testid="stSelectbox"] > div > div,
+    .stApp [data-testid="stMultiSelect"] > div > div,
+    .stApp [data-testid="stNumberInputContainer"],
+    .stApp [data-testid="stTextInputRootElement"] {{
+        border-color: #D5D9E0 !important;
+    }}
+    .stApp [data-testid="stSelectbox"] svg,
+    .stApp [data-testid="stMultiSelect"] > div svg,
+    .stApp [data-testid="stNumberInput"] button svg {{
+        color: {t['text_secondary']} !important;
+    }}
+    .stApp [data-testid="stNumberInput"] button {{
+        background-color: {t['surface']} !important;
+        color: {t['text_secondary']} !important;
+    }}
+    .stApp [data-testid="stNumberInput"] button:hover {{
+        background-color: {t['accent_soft']} !important;
+    }}
+    .stApp [data-testid="stNumberInput"] button:hover svg {{
+        color: {t['accent']} !important;
+    }}
+
+    /* Dropdown menus (rendered in a portal outside .stApp) */
+    div[data-baseweb="popover"] ul,
+    div[data-baseweb="popover"] li,
+    div[data-baseweb="popover"] [role="listbox"],
+    div[data-baseweb="popover"] [role="option"] {{
+        background-color: {t['surface']} !important;
+        color: {t['text_primary']} !important;
+    }}
+    div[data-baseweb="popover"] [role="option"]:hover,
+    div[data-baseweb="popover"] [aria-selected="true"] {{
+        background-color: {t['accent_soft']} !important;
+    }}
+
+    /* Segmented controls & pills: unselected options */
+    .stApp [data-testid="stButtonGroup"] button:not([aria-checked="true"]):not([aria-pressed="true"]):not([data-selected="true"]) {{
+        background-color: {t['surface']} !important;
+        color: {t['text_primary']} !important;
+        border-color: #D5D9E0 !important;
+    }}
+    .stApp [data-testid="stButtonGroup"] button:not([aria-checked="true"]):not([aria-pressed="true"]):not([data-selected="true"]) p {{
+        color: {t['text_primary']} !important;
+    }}
+    .stApp [data-testid="stButtonGroup"] button:not([aria-checked="true"]):not([aria-pressed="true"]):not([data-selected="true"]):hover {{
+        background-color: {t['accent_soft']} !important;
+        border-color: {t['accent']} !important;
+    }}
+
+    /* Secondary & link buttons */
+    .stApp button[kind="secondary"],
+    .stApp a[kind="secondary"] {{
+        background-color: {t['surface']} !important;
+        color: {t['text_primary']} !important;
+        border: 1px solid #D5D9E0 !important;
+    }}
+    .stApp button[kind="secondary"] p,
+    .stApp a[kind="secondary"] p {{
+        color: {t['text_primary']} !important;
+    }}
+    .stApp button[kind="secondary"]:hover,
+    .stApp a[kind="secondary"]:hover {{
+        border-color: {t['accent']} !important;
+        background-color: {t['accent_soft']} !important;
+    }}
+    .stApp button[kind="secondary"]:disabled,
+    .stApp button[kind="secondary"]:disabled p {{
+        color: {t['text_muted']} !important;
+        background-color: {t['bg_frame']} !important;
+    }}
+
+    /* Radios */
+    .stApp [data-testid="stRadioOption"] p {{
+        color: {t['text_primary']} !important;
+    }}
+    /* Unchecked radio: outer ring + inner dot both use the dark canvas colour */
+    .stApp [data-testid="stRadioOption"]:not([data-selected="true"]) > div > div:first-child {{
+        background-color: #C3C8D1 !important;
+    }}
+    .stApp [data-testid="stRadioOption"]:not([data-selected="true"]) > div > div:first-child > div {{
+        background-color: {t['surface']} !important;
+    }}
+
+    /* Element toolbars (fullscreen / download), progress bars */
+    .stApp [data-testid="stElementToolbarButtonContainer"] {{
+        background-color: {t['surface']} !important;
+        border: 1px solid {t['border']} !important;
+    }}
+    .stApp [data-testid="stElementToolbar"] svg {{
+        color: {t['text_secondary']} !important;
+    }}
+    .stApp [data-testid="stProgressBarTrack"] {{
+        background-color: #E4E7EC !important;
+    }}
+
+    /* Code blocks & inline code */
+    .stApp [data-testid="stCode"] pre,
+    .stApp [data-testid="stCode"] code {{
+        background-color: #F3F4F6 !important;
+        color: {t['text_primary']} !important;
+    }}
+    .stApp [data-testid="stCode"] span {{
+        color: {t['text_primary']} !important;
+    }}
+    .stApp [data-testid="stMarkdownContainer"] code {{
+        background-color: #F1F3F5 !important;
+        color: {t['badge_observed_text']} !important;
+    }}
+
+    /* Dataframes: the grid is canvas-drawn from the dark JS theme, so invert it hue-preservingly */
+    .stApp [data-testid="stDataFrameResizable"] {{
+        filter: invert(1) hue-rotate(180deg) !important;
+    }}
+    """

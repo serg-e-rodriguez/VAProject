@@ -1,7 +1,14 @@
 """
-Cached loaders for the Streamlit pages (PROJECT_DESIGN.md §4.1). Everything comes from the
-local snapshot (data/cache), which is real data frozen at build time — no sample fallbacks.
-Pages call these and lay out the UI; the maths lives in campaign_intel.processing / .model.
+Cached, race-aware loaders for the pages. Everything is read from the local snapshot (data/cache);
+pages only lay out what these return.
+
+Conventions
+-----------
+- `race` is "senate" or "house" (config.RACES). Ad spend is filtered to ads attributed to that race
+  (nominee committees, race-specific PACs / party committees, nominee named in the ad text, or
+  Google district targeting). Party / issue / state-race money is reported separately as "other".
+- Ad spend is NC-apportioned and limited to the cycle window (since 2026-07-01): `w_nc_spend_mid`.
+- Region = county (Senate) or congressional district (House).
 """
 
 from __future__ import annotations
@@ -10,160 +17,38 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from campaign_intel.config import RACES
 from campaign_intel.data.snapshot import has_table, manifest, read_table
-from campaign_intel.processing.crosswalk import get_vote_method_splits
-from campaign_intel.processing.survey import (
-    compute_issue_priorities_by_demo,
-    compute_platform_use_by_age,
-)
 from campaign_intel.processing.themes import theme_labels
 
 CYCLE_START = pd.Timestamp("2026-07-01")
+SIDES = ["Dem side", "GOP side"]
+PARTY_ORDER = ["Dem", "Rep", "Unaffiliated", "Other party"]
+DIM_ORDER = {
+    "age": ["18–25", "26–40", "41–65", "66+"],
+    "race": ["White", "Black", "Hispanic / Latino", "Asian", "American Indian", "Other / multiracial", "Undesignated"],
+    "gender": ["Women", "Men", "Undesignated"],
+}
+CHANNEL_LABELS = {"meta": "Facebook / Instagram", "youtube": "YouTube", "search": "Google Search",
+                  "display": "Google Display"}
 
 
+# ----------------------------------------------------------------------------- basics
 @st.cache_data(ttl=600)
 def load_manifest() -> dict:
     return manifest()
 
 
 def snapshot_ready() -> bool:
-    return has_table("units_cd") and has_table("ads_unified")
+    return all(has_table(t) for t in ("units_cd", "ads_unified", "demographics", "house_races"))
 
 
-@st.cache_data(ttl=600)
-def dem_share_of_voice() -> float:
-    m = manifest().get("dem_share_of_voice")
-    return float(m) if m is not None else 0.5
+def snapshot_date() -> pd.Timestamp:
+    return pd.Timestamp(load_manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
 
 
-@st.cache_data(ttl=600)
-def load_units(unit_type: str = "cd", geo_mode: str = "district") -> pd.DataFrame:
-    """Baseline + electorate table for the active geography (one row per unit)."""
-    key = "county" if geo_mode == "county" else unit_type
-    u = read_table(f"units_{key}")
-    # Opponent share of voice: observed statewide GOP share of partisan NC ad spend (Meta+Google).
-    # Ad libraries don't report spend by district, so every unit gets the statewide value.
-    u["opp_share"] = 1.0 - dem_share_of_voice()
-    u["swing_pts"] = u.get("actual26_margin_pct", np.nan) - u["dem_margin_pct"]
-    if key == "cd" and has_table("google_cd_spend_units"):
-        g = read_table("google_cd_spend_units")
-        g = g[g["map_vintage"] == "2026"].groupby("unit_id")["spend_usd"].sum()
-        u["google_spend_2026_map"] = u["unit_id"].map(g).fillna(0.0)
-    return u
-
-
-@st.cache_data(ttl=600)
-def load_ads() -> pd.DataFrame:
-    return read_table("ads_unified")
-
-
-@st.cache_data(ttl=600)
-def load_weekly_by_side(platform: str | None = None) -> pd.DataFrame:
-    w = read_table("weekly_spend_by_side")
-    if platform:
-        w = w[w["platform"] == platform]
-    w = w.groupby(["week_start", "side_group"], as_index=False)[["nc_spend_low", "nc_spend_mid", "nc_spend_high"]].sum()
-    snap = pd.Timestamp(manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
-    # Drop the trailing partial week (it would look like a collapse in spending)
-    last_full = (snap - pd.Timedelta(days=6)).to_period("W-SAT").start_time
-    return w[(w["week_start"] >= CYCLE_START - pd.Timedelta(days=28)) & (w["week_start"] <= last_full)]
-
-
-@st.cache_data(ttl=600)
-def load_sov_weekly() -> pd.DataFrame:
-    w = load_weekly_by_side()
-    p = w.pivot_table(index="week_start", columns="side_group", values="nc_spend_mid", aggfunc="sum").fillna(0)
-    p = p.rename(columns={"Dem side": "dem", "GOP side": "gop"})
-    for c in ["dem", "gop"]:
-        if c not in p.columns:
-            p[c] = 0.0
-    p["dem_share"] = p["dem"] / (p["dem"] + p["gop"]).replace(0, np.nan)
-    return p.reset_index()
-
-
-@st.cache_data(ttl=600)
-def load_overview_kpis() -> dict:
-    ads = load_ads()
-    w = load_weekly_by_side()
-    snap = pd.Timestamp(manifest().get("built_at", pd.Timestamp.today().isoformat())[:10])
-    cyc = w[w["week_start"] >= CYCLE_START]
-    tot = cyc[["nc_spend_low", "nc_spend_mid", "nc_spend_high"]].sum()
-    sov = load_sov_weekly()
-    last4, prev4 = sov.tail(4), sov.iloc[-8:-4]
-    dem4 = last4["dem"].sum() / max(1.0, (last4["dem"] + last4["gop"]).sum())
-    demp = prev4["dem"].sum() / max(1.0, (prev4["dem"] + prev4["gop"]).sum())
-    gop = sov["gop"].tolist()
-    d7, d14 = snap - pd.Timedelta(days=7), snap - pd.Timedelta(days=14)
-    active = ads[ads["end"] >= d7]
-    act = active.groupby("side_group")["ad_id"].nunique()
-    new_dem = ads[(ads["start"] >= d7) & (ads["side_group"] == "Dem side")]["ad_id"].nunique()
-    new_gop = ads[(ads["start"] >= d7) & (ads["side_group"] == "GOP side")]["ad_id"].nunique()
-    new_gop_prev = ads[(ads["start"] >= d14) & (ads["start"] < d7) & (ads["side_group"] == "GOP side")]["ad_id"].nunique()
-    return {
-        "total_mid": float(tot["nc_spend_mid"]), "total_low": float(tot["nc_spend_low"]),
-        "total_high": float(tot["nc_spend_high"]),
-        "weekly_total": (w.groupby("week_start")["nc_spend_mid"].sum().tail(8)).tolist(),
-        "dem_sov_4w": dem4, "dem_sov_prev4w": demp, "sov_series": sov["dem_share"].fillna(0.5).tail(8).tolist(),
-        "gop_last_week": float(gop[-1]) if gop else 0.0, "gop_prev_week": float(gop[-2]) if len(gop) > 1 else 0.0,
-        "gop_series": gop[-8:],
-        "active_dem": int(act.get("Dem side", 0)), "active_gop": int(act.get("GOP side", 0)),
-        "new_dem_7d": int(new_dem), "new_gop_7d": int(new_gop), "new_gop_prev_7d": int(new_gop_prev),
-        "last_week": str(sov["week_start"].max().date()) if len(sov) else "",
-    }
-
-
-@st.cache_data(ttl=600)
-def load_platform_mix() -> pd.DataFrame:
-    return read_table("platform_mix")
-
-
-@st.cache_data(ttl=600)
-def load_advertisers() -> pd.DataFrame:
-    return read_table("advertisers")
-
-
-@st.cache_data(ttl=600)
-def load_alerts() -> pd.DataFrame:
-    return read_table("alerts") if has_table("alerts") else pd.DataFrame(columns=["severity", "type", "advertiser", "text", "date", "alert_id"])
-
-
-@st.cache_data(ttl=600)
-def load_theme_by_age(view: str = "Us") -> pd.DataFrame:
-    """Share of each age group's Meta NC impressions carrying each theme. view: Us | Opponent | Gap."""
-    t = read_table("theme_by_age")
-    labels = theme_labels()
-    t["theme"] = t["theme"].map(lambda x: labels.get(x, x))
-    p = t.pivot_table(index=["theme", "age"], columns="side_group", values="pct", aggfunc="sum").fillna(0.0)
-    for c in ["Dem side", "GOP side"]:
-        if c not in p.columns:
-            p[c] = 0.0
-    if view == "Us":
-        p["pct"] = p["Dem side"]
-    elif view == "Opponent":
-        p["pct"] = p["GOP side"]
-    else:
-        p["pct"] = p["Dem side"] - p["GOP side"]
-    return p.reset_index()[["theme", "age", "pct", "Dem side", "GOP side"]].rename(columns={"age": "age_cohort"})
-
-
-@st.cache_data(ttl=600)
-def load_delivery_by_demo() -> pd.DataFrame:
-    return read_table("delivery_by_demo")
-
-
-@st.cache_data(ttl=600)
-def load_survey_platform_benchmarks() -> pd.DataFrame:
-    return compute_platform_use_by_age()
-
-
-@st.cache_data(ttl=600)
-def load_survey_issue_benchmarks() -> pd.DataFrame:
-    return compute_issue_priorities_by_demo()
-
-
-@st.cache_data(ttl=600)
-def load_vote_methods() -> pd.DataFrame:
-    return get_vote_method_splits()
+def unit_type(race: str) -> str:
+    return RACES[race]["unit_type"]
 
 
 @st.cache_data(ttl=600)
@@ -172,31 +57,318 @@ def load_statewide() -> dict:
 
 
 @st.cache_data(ttl=600)
-def load_creatives(side_group: str = "GOP side", limit: int = 400) -> pd.DataFrame:
-    """Inspectable creatives with text (Meta) plus Google ads (link to the Transparency Report)."""
-    ads = load_ads()
-    a = ads[ads["side_group"] == side_group].copy()
+def load_candidates() -> pd.DataFrame:
+    return read_table("candidates")
+
+
+@st.cache_data(ttl=600)
+def senate_nominees() -> dict:
+    c = load_candidates()
+    c = c[(c["race"] == "senate")].sort_values("votes", ascending=False)
+    dem = c[c["party"] == "DEM"]["name"]
+    rep = c[c["party"] == "REP"]["name"]
+    return {"dem": dem.iloc[0] if len(dem) else "Democratic nominee", "rep": rep.iloc[0] if len(rep) else "Republican nominee"}
+
+
+# ----------------------------------------------------------------------------- regions
+@st.cache_data(ttl=600)
+def load_regions(race: str) -> pd.DataFrame:
+    """One row per region (county or CD) with baseline, registration, turnout and (House) race info."""
+    ut = unit_type(race)
+    u = read_table(f"units_{ut}")
+    u["dem_share_reg"] = u["reg_dem"] / u["registered_voters"]
+    u["rep_share_reg"] = u["reg_rep"] / u["registered_voters"]
+    u["una_share_reg"] = u["reg_una"] / u["registered_voters"]
+    d = read_table("demographics")
+    d = d[(d["unit_type"] == ut) & (d["dim"] == "age")]
+    by = d.groupby(["unit_id", "party"])[["reg22", "voted22"]].sum().unstack("party").fillna(0)
+    for p, key in [("Dem", "dem"), ("Rep", "rep"), ("Unaffiliated", "una")]:
+        u[f"turnout22_{key}"] = u["unit_id"].map(by[("voted22", p)] / by[("reg22", p)].replace(0, np.nan))
+    tot = by["voted22"].sum(axis=1) / by["reg22"].sum(axis=1).replace(0, np.nan)
+    u["turnout22"] = u["unit_id"].map(tot)
+    u["dems_skipped22"] = u["mobilization_universe"]
+    if ut == "cd":
+        h = read_table("house_races")
+        u = u.merge(h.drop(columns=["district_num"]), on="unit_id", how="left")
+        u["result26_margin_pct"] = u["house26_margin_pct"]
+        u["label"] = "CD-" + u["district_num"].astype(str)
+    else:
+        u["result26_margin_pct"] = u["actual26_margin_pct"]
+        u["label"] = u["name"]
+    u["lean"] = u["dem_margin_pct"].map(lean_label)
+    ads = load_region_ad_spend(race)
+    piv = ads.groupby(["unit_id", "side_group"])["spend"].sum().unstack().reindex(columns=SIDES).fillna(0)
+    u["ad_dem"] = u["unit_id"].map(piv["Dem side"]).fillna(0.0)
+    u["ad_gop"] = u["unit_id"].map(piv["GOP side"]).fillna(0.0)
+    u["ad_net_dem"] = u["ad_dem"] - u["ad_gop"]
+    return u
+
+
+def lean_label(m: float) -> str:
+    if pd.isna(m):
+        return "—"
+    a = abs(m)
+    side = "D" if m > 0 else "R"
+    if a < 3:
+        return "Toss-up"
+    if a < 8:
+        return f"Lean {side}"
+    if a < 15:
+        return f"Likely {side}"
+    return f"Safe {side}"
+
+
+def fmt_margin(m: float) -> str:
+    if pd.isna(m):
+        return "—"
+    return f"{'D' if m >= 0 else 'R'} +{abs(m):.1f}"
+
+
+@st.cache_data(ttl=600)
+def load_demographics(unit_type_: str, unit_id: str, dim: str) -> pd.DataFrame:
+    """Rows per group x party for one region (unit_type 'state' / unit_id 'NC' for statewide)."""
+    d = read_table("demographics")
+    d = d[(d["unit_type"] == unit_type_) & (d["unit_id"] == unit_id) & (d["dim"] == dim)].copy()
+    d["turnout22"] = d["voted22"] / d["reg22"].replace(0, np.nan)
+    d["skipped22"] = (d["reg22"] - d["voted22"]).clip(lower=0)
+    return d
+
+
+@st.cache_data(ttl=600)
+def party_totals(unit_type_: str, unit_id: str) -> pd.DataFrame:
+    """Registered (2024), registered (2022), voted (2022) and turnout by party for one region."""
+    d = load_demographics(unit_type_, unit_id, "age")
+    g = d.groupby("party", as_index=False)[["reg24", "reg22", "voted22"]].sum()
+    g["turnout22"] = g["voted22"] / g["reg22"].replace(0, np.nan)
+    g["party"] = pd.Categorical(g["party"], PARTY_ORDER, ordered=True)
+    return g.sort_values("party").reset_index(drop=True)
+
+
+def path_to_win(margin_pct: float, expected_turnout: float, pt: pd.DataFrame) -> dict:
+    """
+    Net votes we are behind (or ahead) at the 2024 presidential margin in a midterm-sized electorate,
+    and what closing it takes: share of non-voting Dems to turn out, or extra net margin among
+    unaffiliated voters who usually vote.
+    """
+    gap = -margin_pct / 100 * expected_turnout  # >0 = votes we need
+    dem = pt[pt["party"] == "Dem"].iloc[0] if (pt["party"] == "Dem").any() else None
+    una = pt[pt["party"] == "Unaffiliated"].iloc[0] if (pt["party"] == "Unaffiliated").any() else None
+    skipped = float(dem["reg24"] * (1 - dem["turnout22"])) if dem is not None else np.nan
+    una_voters = float(una["reg24"] * una["turnout22"]) if una is not None else np.nan
+    return {
+        "gap": gap,
+        "dems_skipped": skipped,
+        "una_voters": una_voters,
+        "mobilize_share": gap / skipped if gap > 0 and skipped else 0.0,
+        "una_points": gap / una_voters * 100 if gap > 0 and una_voters else 0.0,
+    }
+
+
+# ----------------------------------------------------------------------------- ads
+@st.cache_data(ttl=600)
+def load_ads(race: str | None = None) -> pd.DataFrame:
+    a = read_table("ads_unified")
+    a = a[a["window_frac"] > 0]
+    return a[a["race"] == race] if race else a
+
+
+@st.cache_data(ttl=600)
+def spend_summary(race: str) -> dict:
+    a = load_ads(race)
+    by = a.groupby("side_group")["w_nc_spend_mid"].sum()
+    dem, gop = float(by.get("Dem side", 0)), float(by.get("GOP side", 0))
+    w = weekly_by_side(race)
+    p = w.pivot_table(index="week_start", columns="side_group", values="spend", aggfunc="sum").reindex(columns=SIDES).fillna(0)
+    last4, prev4 = p.tail(4).sum(), p.iloc[-8:-4].sum()
+    share = lambda s: s["Dem side"] / (s.sum() or 1)  # noqa: E731
+    other = load_ads()
+    other = other[other["race"] == "other"]["w_nc_spend_mid"].sum()
+    return {
+        "dem": dem, "gop": gop, "partisan": dem + gop,
+        "unclassified": float(by.get("Unclassified", 0) + by.get("Nonpartisan / other", 0)),
+        "dem_share": dem / (dem + gop) if dem + gop else np.nan,
+        "dem_share_4w": share(last4), "dem_share_prev4w": share(prev4),
+        "gop_4w": float(last4["GOP side"]), "gop_prev4w": float(prev4["GOP side"]),
+        "dem_4w": float(last4["Dem side"]),
+        "other_races": float(other),
+        "gop_last": _last_end(a, "GOP side"), "dem_last": _last_end(a, "Dem side"),
+        "n_ads": int(a["ad_id"].nunique()),
+    }
+
+
+def _last_end(a: pd.DataFrame, side: str) -> pd.Timestamp | None:
+    """Last delivery day of any meaningful ad (≥ $1K NC spend) on one side."""
+    x = a[(a["side_group"] == side) & (a["w_nc_spend_mid"] >= 1000)]
+    return x["end"].max() if len(x) else None
+
+
+def went_dark(s: dict, side: str = "gop", days: int = 14) -> str | None:
+    """'Oct 03' if that side has run no meaningful ads for `days`+ days before the snapshot."""
+    last = s.get(f"{side}_last")
+    if last is not None and pd.notna(last) and last < snapshot_date() - pd.Timedelta(days=days):
+        return f"{last:%b %d}"
+    return None
+
+
+@st.cache_data(ttl=600)
+def weekly_by_side(race: str) -> pd.DataFrame:
+    w = read_table("weekly_spend_by_side")
+    w = w[(w["race"] == race) & w["side_group"].isin(SIDES)]
+    w = w.groupby(["week_start", "side_group", "platform"], as_index=False)["nc_spend_mid"].sum()
+    w = w.rename(columns={"nc_spend_mid": "spend"})
+    last_full = (snapshot_date() - pd.Timedelta(days=6)).to_period("W-SAT").start_time
+    return w[(w["week_start"] >= CYCLE_START) & (w["week_start"] <= last_full)]
+
+
+@st.cache_data(ttl=600)
+def weekly_by_channel(race: str, side: str) -> pd.DataFrame:
+    """Spend per week x channel for one side (each ad's spend spread over its delivery days)."""
+    a = load_ads(race)
+    a = a[(a["side_group"] == side) & (a["w_nc_spend_mid"] > 0)].copy()
+    if a.empty:
+        return pd.DataFrame(columns=["week_start", "channel", "spend"])
+    start = a["start"].clip(lower=CYCLE_START)
+    days = ((a["end"] - start).dt.days + 1).clip(lower=1)
+    a = a.assign(start=start, days=days, per_day=a["w_nc_spend_mid"] / days).reset_index(drop=True)
+    a = a.loc[a.index.repeat(a["days"].astype(int))]
+    a["day"] = a["start"] + pd.to_timedelta(a.groupby(level=0).cumcount(), unit="D")
+    a["week_start"] = a["day"].dt.to_period("W-SAT").dt.start_time
+    out = a.groupby(["week_start", "channel"], as_index=False)["per_day"].sum().rename(columns={"per_day": "spend"})
+    out["channel"] = out["channel"].map(CHANNEL_LABELS).fillna(out["channel"])
+    last_full = (snapshot_date() - pd.Timedelta(days=6)).to_period("W-SAT").start_time
+    return out[out["week_start"] <= last_full]
+
+
+@st.cache_data(ttl=600)
+def top_advertisers(race: str, side: str | None = None, n: int = 10) -> pd.DataFrame:
+    a = load_ads(race)
+    a = a[a["side_group"].isin([side] if side else SIDES)].copy()
+    snap = snapshot_date()
+    # Google and Meta spell the same committee differently ("COOPER FOR NORTH CAROLINA" vs
+    # "Cooper for North Carolina"): merge on a case/space-folded key, show the biggest spender's spelling.
+    key = a["advertiser"].str.casefold().str.split().str.join(" ")
+    name = (a.assign(_k=key).groupby(["_k", "advertiser"])["w_nc_spend_mid"].sum()
+            .sort_values(ascending=False).reset_index().drop_duplicates("_k").set_index("_k")["advertiser"])
+    a["advertiser"] = key.map(name)
+    g = a.groupby(["advertiser", "side_group"], as_index=False).agg(
+        spend=("w_nc_spend_mid", "sum"), ads=("ad_id", "nunique"),
+        platforms=("platform", lambda s: " + ".join(sorted(set(s)))),
+        active_7d=("end", lambda s: int((s >= snap - pd.Timedelta(days=7)).sum())),
+        last_seen=("end", "max"))
+    return g.sort_values("spend", ascending=False).head(n).reset_index(drop=True)
+
+
+@st.cache_data(ttl=600)
+def channel_by_side(race: str) -> pd.DataFrame:
+    a = load_ads(race)
+    a = a[a["side_group"].isin(SIDES)]
+    g = a.groupby(["channel", "side_group"], as_index=False)["w_nc_spend_mid"].sum().rename(columns={"w_nc_spend_mid": "spend"})
+    g["channel"] = g["channel"].map(CHANNEL_LABELS).fillna(g["channel"])
+    g["share"] = g["spend"] / g.groupby("side_group")["spend"].transform("sum")
+    return g
+
+
+@st.cache_data(ttl=600)
+def themes_by_side(race: str) -> pd.DataFrame:
+    """Share of each side's (Meta, text-classified) spend that carries each message theme."""
+    a = load_ads(race)
+    a = a[a["side_group"].isin(SIDES) & (a["platform"] == "Meta")]
+    labels = theme_labels()
+    tot = a.groupby("side_group")["w_nc_spend_mid"].sum()
+    x = a[["side_group", "w_nc_spend_mid", "message_themes"]].explode("message_themes").dropna(subset=["message_themes"])
+    g = x.groupby(["side_group", "message_themes"], as_index=False)["w_nc_spend_mid"].sum()
+    g["share"] = g["w_nc_spend_mid"] / g["side_group"].map(tot)
+    g["theme"] = g["message_themes"].map(lambda t: labels.get(t, t))
+    return g.rename(columns={"w_nc_spend_mid": "spend"})[["side_group", "theme", "spend", "share"]]
+
+
+@st.cache_data(ttl=600)
+def audience_by_side(race: str) -> pd.DataFrame:
+    """Share of each side's Meta impressions in NC by age x gender (who their ads actually reached)."""
+    d = read_table("delivery_by_demo")
+    d = d[(d["race"] == race) & d["side_group"].isin(SIDES) & d["gender"].isin(["female", "male"])
+          & (d["age"] != "13-17")]
+    d["gender"] = d["gender"].map({"female": "Women", "male": "Men"})
+    d["share"] = d["impressions"] / d.groupby("side_group")["impressions"].transform("sum")
+    return d
+
+
+@st.cache_data(ttl=600)
+def load_creatives(race: str, side: str = "GOP side") -> pd.DataFrame:
+    a = load_ads(race)
+    a = a[a["side_group"] == side].copy()
     a["has_text"] = a["body"].str.len() > 0
-    a = a.sort_values(["has_text", "start"], ascending=[False, False]).head(limit)
+    a = a.sort_values(["start", "nc_spend_mid"], ascending=[False, False])
     if has_table("meta_demographics"):
         d = read_table("meta_demographics")
-        d = d[d["ad_id"].isin(a["ad_id"])].sort_values("pct", ascending=False).drop_duplicates("ad_id")
-        top = d.set_index("ad_id").apply(lambda r: f"{str(r.gender).title()} {r.age} ({r.pct:.0%})", axis=1)
-        a["top_demo"] = a["ad_id"].map(top).fillna("—")
+        d = d[d["ad_id"].isin(a["ad_id"]) & d["gender"].isin(["female", "male"])]
+        d = d.sort_values("pct", ascending=False).drop_duplicates("ad_id")
+        top = d.set_index("ad_id").apply(lambda r: f"{'Women' if r.gender == 'female' else 'Men'} {r.age}", axis=1)
+        a["top_audience"] = a["ad_id"].map(top)
     else:
-        a["top_demo"] = "—"
+        a["top_audience"] = None
     return a
 
 
+@st.cache_data(ttl=600)
+def new_activity(race: str, side: str = "GOP side", days: int = 7) -> pd.DataFrame:
+    """Advertisers on one side that launched ads in the last `days` days of the snapshot."""
+    a = load_ads(race)
+    a = a[(a["side_group"] == side) & (a["start"] >= snapshot_date() - pd.Timedelta(days=days))]
+    g = a.groupby("advertiser", as_index=False).agg(new_ads=("ad_id", "nunique"), spend=("nc_spend_mid", "sum"),
+                                                    platforms=("platform", lambda s: " + ".join(sorted(set(s)))))
+    return g.sort_values("spend", ascending=False).reset_index(drop=True)
+
+
+# ----------------------------------------------------------------------------- region ad spend
+@st.cache_data(ttl=600)
+def load_region_ad_spend(race: str) -> pd.DataFrame:
+    r = read_table("region_ad_spend")
+    return r[(r["unit_type"] == unit_type(race)) & (r["race"] == race)]
+
+
+@st.cache_data(ttl=600)
+def region_advertisers(race: str, unit_id: str, n: int = 6) -> pd.DataFrame:
+    r = load_region_ad_spend(race)
+    r = r[(r["unit_id"] == unit_id) & r["side_group"].isin(SIDES)]
+    g = r.groupby(["advertiser", "side_group"], as_index=False)["spend"].sum()
+    return g.sort_values("spend", ascending=False).head(n)
+
+
+@st.cache_data(ttl=600)
+def statewide_untargeted(race: str) -> dict:
+    """Spend that is not geo-targeted below state level (Meta, and Google ads aimed at all of NC)."""
+    a = load_ads(race)
+    a = a[a["side_group"].isin(SIDES)]
+    geo_ids = set(read_table("google_ad_counties")["ad_id"])
+    un = a[~a["ad_id"].isin(geo_ids)]
+    return un.groupby("side_group")["w_nc_spend_mid"].sum().reindex(SIDES).fillna(0).to_dict()
+
+
+@st.cache_data(ttl=600)
+def google_cd_reported(unit_id: str) -> float | None:
+    """Google's own reported political-ad spend for a congressional district (2026 map, all advertisers)."""
+    if not has_table("google_cd_spend_units"):
+        return None
+    g = read_table("google_cd_spend_units")
+    g = g[(g["map_vintage"] == "2026") & (g["unit_id"] == unit_id)]
+    return float(g["spend_usd"].sum()) if len(g) else None
+
+
+# ----------------------------------------------------------------------------- formatting
 def fmt_money(x: float) -> str:
     x = float(x or 0)
     if abs(x) >= 1e6:
-        return f"${x / 1e6:.2f}M"
+        return f"${x / 1e6:.1f}M"
     if abs(x) >= 1e3:
-        return f"${x / 1e3:.0f}k"
+        return f"${x / 1e3:.0f}K"
     return f"${x:,.0f}"
 
 
-def esc(text: str) -> str:
-    """Escape $ so Streamlit markdown doesn't render money as LaTeX."""
-    return text.replace("$", "\\$")
+def fmt_num(x: float) -> str:
+    x = float(x or 0)
+    if abs(x) >= 1e6:
+        return f"{x / 1e6:.2f}M"
+    if abs(x) >= 1e4:
+        return f"{x / 1e3:.0f}K"
+    return f"{x:,.0f}"

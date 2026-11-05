@@ -2,7 +2,7 @@
 Builds the local data snapshot the app reads (data/cache/*.parquet + manifest.json).
 
     uv run python -m campaign_intel.ingest.build_snapshot            # everything
-    uv run python -m campaign_intel.ingest.build_snapshot --skip-meta --skip-google   # re-derive only
+    uv run python -m campaign_intel.ingest.build_snapshot --skip-meta --skip-google   # NCSBE + re-derive (no API keys)
 
 Steps: NCSBE (elections + registration) -> Google BigQuery -> Meta Ad Library -> derived tables.
 Raw downloads are cached under data/raw/ (git-ignored); --refresh re-downloads them.
@@ -36,8 +36,13 @@ def _save(name: str, df: pd.DataFrame) -> None:
 def step_ncsbe(refresh: bool) -> None:
     from campaign_intel.ingest import ncsbe
 
+    from campaign_intel.ingest import regions
+
     for name, df in ncsbe.build(force_download=refresh).items():
         _save(name, df)
+    for name, df in regions.build().items():
+        if name != "nc_zip_county":  # committed under data/geo
+            _save(name, df)
 
 
 def step_google() -> None:
@@ -71,8 +76,16 @@ def step_derive() -> dict:
     now = pd.Timestamp(datetime.now(UTC).date())
     google, meta = read_table("google_creatives"), read_table("meta_ads")
     demo = read_table("meta_demographics")
-    ads = adsproc.add_window_fraction(adsproc.unified_ads(google, meta, now), WINDOW_START)
+    from campaign_intel.ingest import ncsbe, regions
+
+    ads = adsproc.unified_ads(google, meta, now)
+    ads = adsproc.attribute_races(ads, read_table("candidates"))
+    ads = adsproc.add_window_fraction(ads, WINDOW_START)
     _save("ads_unified", ads)
+    xw = read_table("county_district_crosswalk")
+    geo = adsproc.google_ad_counties(google, regions.zip_county(), ncsbe.county_fips_lookup(), xw)
+    _save("google_ad_counties", geo)
+    _save("region_ad_spend", adsproc.region_ad_spend(ads, geo, xw))
 
     labels = theme_labels()
     _save("weekly_spend_by_side", adsproc.weekly_by_side(ads, since="2026-06-01"))  # 4 extra weeks for context
