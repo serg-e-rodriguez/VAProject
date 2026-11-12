@@ -178,6 +178,17 @@ def inject(theme: str = "dark"):
     .group-title {{ font-size: 13px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
         color: var(--text-muted); margin: 26px 0 10px; }}
 
+    /* War Room steps */
+    .step {{ display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800;
+        color: var(--text-primary); margin: 30px 0 12px; }}
+    .step span {{ display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
+        border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; font-weight: 800; }}
+    .step.reveal span {{ background: var(--dem); }}
+    .wr-lead {{ font-size: 15px; color: var(--text-secondary); margin: 10px 2px 4px; line-height: 1.5; }}
+    .wr-goal {{ font-size: 14px; color: var(--text-secondary); padding-bottom: 10px; }}
+    .wr-meter {{ font-size: 13.5px; color: var(--text-secondary); margin-top: -6px; }}
+    .wr-meter .rep {{ color: var(--rep); font-weight: 700; }}
+
     /* Callouts */
     .callout {{ border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 10px;
         padding: 12px 16px; margin: 6px 0 10px; }}
@@ -289,7 +300,8 @@ def _light_overrides(t: dict) -> str:
         color: {t['text_secondary']} !important;
     }}
     .stApp [data-testid="stSelectbox"] div[value],
-    .stApp [data-testid="stSelectbox"] input {{
+    .stApp [data-testid="stSelectbox"] input,
+    .stApp [data-testid="stTextInput"] input {{
         color: {t['text_primary']} !important;
         -webkit-text-fill-color: {t['text_primary']} !important;
     }}

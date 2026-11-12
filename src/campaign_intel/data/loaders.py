@@ -372,3 +372,21 @@ def fmt_num(x: float) -> str:
     if abs(x) >= 1e4:
         return f"{x / 1e3:.0f}K"
     return f"{x:,.0f}"
+
+
+# ----------------------------------------------------------------------------- war room (rewind)
+@st.cache_data(ttl=600)
+def spend_as_of(race: str, asof: str) -> dict:
+    """Race ad spend by side before `asof` (what a planner knew then), the 4-week pace, and after it."""
+    w = weekly_by_side(race)
+    p = w.pivot_table(index="week_start", columns="side_group", values="spend", aggfunc="sum").reindex(columns=SIDES).fillna(0)
+    cut = pd.Timestamp(asof)
+    before, after = p[p.index < cut], p[p.index >= cut]
+    last4 = before.tail(4)
+    tot = before.sum()
+    return {
+        "dem": float(tot["Dem side"]), "gop": float(tot["GOP side"]),
+        "dem_4w": float(last4["Dem side"].sum()), "gop_4w": float(last4["GOP side"].sum()),
+        "gop_share": float(tot["GOP side"] / tot.sum()) if tot.sum() else 0.5,
+        "dem_after": float(after["Dem side"].sum()), "gop_after": float(after["GOP side"].sum()),
+    }

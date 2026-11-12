@@ -8,6 +8,7 @@ Colour rules: Dem = blue, GOP / Rep = red everywhere; Unaffiliated = violet; oth
 from __future__ import annotations
 
 import altair as alt
+import numpy as np
 import pandas as pd
 
 from campaign_intel.ui.styles import get_tokens
@@ -224,3 +225,100 @@ def age_reach(df: pd.DataFrame, theme: str) -> alt.Chart:
         tooltip=[alt.Tooltip("age:N", title="Age"), alt.Tooltip("side:N", title="Side"),
                  alt.Tooltip("share:Q", title="Share of impressions", format=".0%")],
     ).properties(height=260)
+
+
+# ----------------------------------------------------------------------------- war room
+def win_chance_bar(base: float, plan: float, lo: float, hi: float, theme: str, label: str = "Win chance") -> alt.Chart:
+    """0-100% track: shaded plan range, hollow tick = no extra spend, solid dot = with the plan."""
+    t = get_tokens(theme)
+    track = alt.Chart(pd.DataFrame({"a": [0.0], "b": [1.0]})).mark_bar(height=14, color=t["border"], opacity=0.5,
+                                                                         cornerRadius=7).encode(
+        x=alt.X("a:Q", scale=alt.Scale(domain=[0, 1]), axis=alt.Axis(format=".0%", values=[0, .25, .5, .75, 1],
+                                                                       title=None, grid=False)), x2="b:Q")
+    rng = alt.Chart(pd.DataFrame({"a": [lo], "b": [hi]})).mark_bar(height=14, color=t["dem"], opacity=0.35,
+                                                                   cornerRadius=7).encode(
+        x="a:Q", x2="b:Q", tooltip=[alt.Tooltip("a:Q", title="Low end", format=".0%"),
+                                    alt.Tooltip("b:Q", title="High end", format=".0%")])
+    half = alt.Chart(pd.DataFrame({"x": [0.5]})).mark_rule(color=t["text_muted"], strokeDash=[3, 3]).encode(x="x:Q")
+    pts = pd.DataFrame({"x": [base, plan], "what": ["Without new spend", "With this plan"]})
+    b = alt.Chart(pts[pts["what"] == "Without new spend"]).mark_point(size=180, shape="diamond", filled=False,
+                                                                      strokeWidth=2, color=t["text_secondary"]).encode(
+        x="x:Q", tooltip=[alt.Tooltip("what:N", title=" "), alt.Tooltip("x:Q", title=label, format=".1%")])
+    p = alt.Chart(pts[pts["what"] == "With this plan"]).mark_circle(size=220, opacity=1, color=t["dem"]).encode(
+        x="x:Q", tooltip=[alt.Tooltip("what:N", title=" "), alt.Tooltip("x:Q", title=label, format=".1%")])
+    return (track + rng + half + b + p).properties(height=60)
+
+
+def outcome_dist(hist: pd.DataFrame, theme: str, threshold: float, x_title: str, seats: bool = False) -> alt.Chart:
+    """Baseline (grey outline) vs plan (filled, blue = win side / red = loss side) outcome distribution."""
+    t = get_tokens(theme)
+    h = hist.copy()
+    h["mid"] = (h["bin_start"] + h["bin_end"]) / 2
+    tot = h.groupby("series")["count"].transform("sum")
+    h["share"] = h["count"] / tot.replace(0, 1)
+    h["side"] = np.where(h["mid"] > threshold, "We win", "We lose")
+    fmt = "d" if seats else "~s"
+    x = alt.X("bin_start:Q", title=x_title, axis=alt.Axis(format=fmt, **({"tickMinStep": 1} if seats else {})),
+              bin="binned")
+    plan = alt.Chart(h[h["series"] == "With plan"]).mark_bar(opacity=0.85, binSpacing=1).encode(
+        x=x, x2="bin_end:Q", y=alt.Y("share:Q", title="Share of simulations", axis=alt.Axis(format=".0%")),
+        color=alt.Color("side:N", scale=alt.Scale(domain=["We win", "We lose"], range=[t["dem"], t["rep"]]),
+                        title="With this plan", legend=alt.Legend(orient="top")),
+        tooltip=[alt.Tooltip("bin_start:Q", title="From", format=",.0f"), alt.Tooltip("bin_end:Q", title="To", format=",.0f"),
+                 alt.Tooltip("share:Q", title="Share of simulations", format=".1%")])
+    base = alt.Chart(h[h["series"] != "With plan"]).mark_line(interpolate="step", color=t["text_secondary"],
+                                                              strokeDash=[4, 3], strokeWidth=1.5).encode(
+        x=alt.X("mid:Q"), y="share:Q")
+    rule = alt.Chart(pd.DataFrame({"x": [threshold]})).mark_rule(color=t["text_primary"], strokeWidth=1.5).encode(x="x:Q")
+    return (plan + base + rule).properties(height=230)
+
+
+def net_votes_bars(df: pd.DataFrame, theme: str, height: int | None = None) -> alt.Chart:
+    """Expected net votes gained per region, with the 10-90% range as a whisker."""
+    t = get_tokens(theme)
+    d = df.sort_values("delta_votes", ascending=False)
+    order = d["label"].tolist()
+    base = alt.Chart(d).encode(y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=180)))
+    bars = base.mark_bar(color=t["dem"], cornerRadiusEnd=3, height={"band": 0.65}).encode(
+        x=alt.X("delta_votes:Q", title="Net votes gained", axis=alt.Axis(format="~s")),
+        tooltip=[alt.Tooltip("label:N", title="Region"), alt.Tooltip("budget:Q", title="Budget", format="$,.0f"),
+                 alt.Tooltip("delta_votes:Q", title="Net votes (expected)", format=",.0f"),
+                 alt.Tooltip("delta_low:Q", title="Low end", format=",.0f"),
+                 alt.Tooltip("delta_high:Q", title="High end", format=",.0f")])
+    whisk = base.mark_rule(color=t["text_secondary"]).encode(x="delta_low:Q", x2="delta_high:Q")
+    return (bars + whisk).properties(height=height or max(120, 28 * len(d)))
+
+
+def reveal_board(df: pd.DataFrame, theme: str, height: int | None = None) -> alt.Chart:
+    """Per region: 2024 start (grey tick) -> our projection (hollow) -> actual 2026 result (solid)."""
+    t = get_tokens(theme)
+    d = df.copy()
+    d["won"] = np.where(d["actual_pct"] > 0, "We won", "We lost")
+    order = d.sort_values("actual_pct", ascending=False)["label"].tolist()
+    m = max(15.0, float(d[["start_pct", "proj_pct", "actual_pct"]].abs().max().max()) + 3)
+    x = alt.X("proj_pct:Q", title="Margin, points (left = Republican, right = Democrat)", scale=alt.Scale(domain=[-m, m]))
+    tips = [alt.Tooltip("label:N", title="Region"), alt.Tooltip("start_pct:Q", title="2024 start", format="+.1f"),
+            alt.Tooltip("proj_pct:Q", title="Projected with plan", format="+.1f"),
+            alt.Tooltip("actual_pct:Q", title="Actual 2026", format="+.1f"),
+            alt.Tooltip("budget:Q", title="Plan money", format="$,.0f")]
+    base = alt.Chart(d).encode(y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=180)))
+    zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=t["text_muted"], strokeDash=[4, 3]).encode(x="x:Q")
+    link = base.mark_rule(strokeWidth=2, color=t["border"]).encode(x=x, x2="actual_pct:Q")
+    start = base.mark_tick(thickness=2, size=14, color=t["text_muted"]).encode(x="start_pct:Q", tooltip=tips)
+    proj = base.mark_point(size=90, filled=False, strokeWidth=2, color=t["text_secondary"]).encode(x=x, tooltip=tips)
+    act = base.mark_circle(size=130, opacity=1).encode(
+        x="actual_pct:Q", color=alt.Color("won:N", scale=alt.Scale(domain=["We won", "We lost"], range=[t["dem"], t["rep"]]),
+                                          title="Actual 2026", legend=alt.Legend(orient="top")), tooltip=tips)
+    return (zero + link + start + proj + act).properties(height=height or LEGEND_PX + max(140, 30 * len(d)))
+
+
+def plan_weeks(df: pd.DataFrame, order: list[str], theme: str, height: int = 200) -> alt.Chart:
+    """Planned spend per week (stacked by platform), weeks as labelled columns."""
+    return alt.Chart(df).mark_bar(cornerRadiusTopLeft=2, cornerRadiusTopRight=2).encode(
+        x=alt.X("week:O", sort=order, title="Week of", axis=alt.Axis(labelAngle=0)),
+        y=alt.Y("dollars:Q", title="Planned spend", axis=alt.Axis(format="$~s")),
+        color=alt.Color("channel:N", scale=channel_scale(theme), title=None, legend=alt.Legend(orient="top")),
+        order=alt.Order("channel:N"),
+        tooltip=[alt.Tooltip("week:O", title="Week of"), alt.Tooltip("channel:N", title="Platform"),
+                 alt.Tooltip("dollars:Q", title="Planned", format="$,.0f")],
+    ).properties(height=height)

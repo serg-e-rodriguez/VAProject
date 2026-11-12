@@ -45,9 +45,12 @@ class RaceContext:
     budget: float
     units: pd.DataFrame  # unit_id, name, baseline_margin_votes, expected_turnout,
     #                      persuasion_universe, mobilization_universe, [opp_share]
+    seats_needed: int | None = None  # chamber scope: seats that count as a "win" (default: majority)
 
     @property
     def majority(self) -> int:
+        if self.seats_needed is not None:
+            return self.seats_needed
         return CHAMBER_MAJORITY.get(self.unit_type, len(self.units) // 2 + 1)
 
 

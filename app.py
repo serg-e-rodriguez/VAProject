@@ -2,7 +2,7 @@
 NC Democrats — campaign intelligence for the 2026 US Senate and US House races.
 
 Sidebar: pick the race first (Senate / House), then one of three views:
-Overview · Region Analysis (-> Audience Analysis of the selected region) · Opponent Tracker.
+Overview · Region Analysis (-> Audience Analysis of the selected region) · Opponent Tracker · War Room.
 """
 
 import streamlit as st
@@ -28,6 +28,7 @@ PAGES = {
     "overview": st.Page("app_pages/overview.py", title="Overview", icon=":material/dashboard:", default=True),
     "regions": st.Page("app_pages/regions.py", title="Region Analysis", icon=":material/map:"),
     "opponent": st.Page("app_pages/opponent.py", title="Opponent Tracker", icon=":material/my_location:"),
+    "war_room": st.Page("app_pages/war_room.py", title="War Room", icon=":material/strategy:"),
 }
 nav = st.navigation(list(PAGES.values()), position="hidden")
 
@@ -55,6 +56,9 @@ with st.sidebar:
            f"↳ Audience Analysis · pick a {RACES[race()]['unit_word']} on the map")
     st.markdown(f"<div class='subnav'>{sub}</div>", unsafe_allow_html=True)
     st.page_link(PAGES["opponent"])
+
+    st.markdown("<div class='side-label'>3 · Plan</div>", unsafe_allow_html=True)
+    st.page_link(PAGES["war_room"])
 
     st.divider()
     if st.button("☀️ Light mode" if theme() == "dark" else "🌙 Dark mode", key="theme_btn", width="stretch"):
