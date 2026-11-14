@@ -108,6 +108,8 @@ class PlanSettings:
     opp_on: bool = True              # step 2: let opponent ads blunt ours
     opp_lambda: float = 0.5          # strength: our effect x 1/(1 + lambda x opponent share of voice)
     messages: tuple[tuple[str, float], ...] = ()  # our message mix: (theme, share); empty = no specific theme
+    area_budgets: tuple[tuple[str, float], ...] = ()  # step 1: fixed dollars per area (unit_id, dollars)
+    rest_free: bool = True           # the budget not assigned to an area may go to any other area
 
     @property
     def weeks(self) -> int:
@@ -121,13 +123,21 @@ class PlanSettings:
              "timing": WR.TIMINGS.get(self.timing, self.timing),
              "opponent_ads_blunt_ours": self.opp_on,
              "opponent_strength_lambda": self.opp_lambda if self.opp_on else 0.0,
-             "our_message_mix": {theme_labels().get(t, t): round(w, 2) for t, w in self.messages} or "no specific theme"}
+             "our_message_mix": {theme_labels().get(t, t): round(w, 2) for t, w in self.messages} or "no specific theme",
+             "user_set_area_budgets_usd": {_label(self.race, u): round(v) for u, v in self.area_budgets} or "none (model decides)",
+             "rest_of_budget": ("placed by the model in other areas" if self.rest_free else "not spent")
+             if self.area_budgets else "n/a"}
         if self.race == "house":
             d["goal"] = ("win one more seat than we start favoured in" if self.house_mode == "seats"
                          else f"win {self.target}")
         else:
             d["goal"] = "win the statewide race"
         return d
+
+
+def _label(race: str, unit_id: str) -> str:
+    r = load_regions(race)
+    return dict(zip(r["unit_id"], r["label"])).get(unit_id, unit_id)
 
 
 def asof_options() -> list[pd.Timestamp]:
@@ -220,6 +230,17 @@ def _channels(ps: PlanSettings) -> list[str]:
 
 
 # ============================================================================ model calls (cached)
+def area_budgets_for(ps: PlanSettings, budget: float | None = None) -> list[tuple[str, float]]:
+    """The step-1 area amounts, scaled to `budget` (for the budget curve) and down to the budget if they exceed it."""
+    ab = [(u, float(v)) for u, v in ps.area_budgets if v and v > 0]
+    tot = sum(v for _, v in ab)
+    if not ab or tot <= 0:
+        return []
+    f = (budget if budget is not None else ps.budget) / ps.budget if ps.budget > 0 else 0.0
+    shrink = min(1.0, ps.budget / tot)
+    return [(u, v * shrink * f) for u, v in ab]
+
+
 @st.cache_data(show_spinner=False, max_entries=64)
 def recommend(ps: PlanSettings) -> pd.DataFrame:
     """The recommended plan for the whole budget: mix rows (unit_id, channel, audience, dollars)."""
@@ -256,9 +277,18 @@ def _greedy(ps: PlanSettings, ctx, a: Assumptions, budget: float) -> pd.DataFram
     X = np.zeros((len(ids), len(chans), 2))
     step = float(min(50_000.0, max(5_000.0, budget / 100)))
     remaining = float(budget)
+    # Step-1 area budgets: a set area gets (at most) its amount; the rest of the budget is a shared pool for the
+    # areas left blank (or nothing, if the user keeps the rest unspent). Amounts scale with `budget` (budget curve).
+    fixed = {u: float(v) for u, v in area_budgets_for(ps, budget)}
+    is_fixed = np.array([u in fixed for u in ids])
+    room = np.array([fixed.get(u, np.inf) for u in ids])                          # (U,) per-area room
+    pool = max(0.0, budget - sum(fixed.values())) if ps.rest_free else 0.0       # shared by blank areas
+    if fixed:
+        remaining = min(remaining, sum(fixed.values()) + pool)
     while remaining >= 1.0:
         S = np.einsum("uca,c->ua", X, stock_per_dollar)
-        inc = np.minimum(np.minimum(step, cap - X), remaining)                    # (U, C, A)
+        unit_room = np.where(is_fixed, room, pool) if fixed else np.full(len(ids), np.inf)
+        inc = np.minimum(np.minimum(np.minimum(step, cap - X), remaining), unit_room[:, None, None])  # (U, C, A)
         dS = inc * stock_per_dollar[None, :, None]
         gain = scale[:, None, :] * np.exp(-k * S / univ)[:, None, :] * (1 - np.exp(-k * dS / univ[:, None, :]))
         score = np.where(inc >= min(500.0, remaining), gain * wts[:, None, None] / np.maximum(inc, 1.0), -np.inf)
@@ -267,6 +297,11 @@ def _greedy(ps: PlanSettings, ctx, a: Assumptions, budget: float) -> pd.DataFram
             break
         X[best] += inc[best]
         remaining -= inc[best]
+        if fixed:
+            if is_fixed[best[0]]:
+                room[best[0]] -= inc[best]
+            else:
+                pool -= inc[best]
     u, c, g = np.nonzero(X)
     return pd.DataFrame({"unit_id": ids[u], "channel": np.array(chans)[c], "audience": np.array(AUDIENCES)[g],
                          "dollars": X[u, c, g]}, columns=WR.MIX_COLS).reset_index(drop=True)
@@ -355,7 +390,10 @@ def headline(ps: PlanSettings, ctx, res: SimulationResult, mm: pd.DataFrame, pla
     parts = [(f"This plan buys ≈{res.total_delta_votes:,.0f} net votes ({lo:,.0f}–{hi:,.0f}) for "
              f"{fmt_money(res.total_spent)}, moving the {ww[0].lower() + ww[1:]} from "
              f"{res.baseline_win_prob:.0%} to {res.win_prob:.0%}.")]
-    if res.total_spent < ps.budget - 1000:
+    assigned = sum(v for _, v in area_budgets_for(ps))
+    if ps.area_budgets and not ps.rest_free and assigned < ps.budget - 1000:
+        parts.append(f"{fmt_money(ps.budget - assigned)} is not assigned to any area (step 1), so it is not spent.")
+    elif res.total_spent < ps.budget - 1000:
         parts.append(f"{fmt_money(ps.budget - res.total_spent)} is not planned: every allowed platform hits the model's "
                      f"frequency cap ({FREQ_CAP:.0f} impressions per person per week). Allow more platforms, spend more "
                      "evenly or plan earlier to place it.")
@@ -1350,3 +1388,57 @@ def top_reach(ad_id: str) -> str | None:
         return None
     r = d.loc[d["pct"].idxmax()]
     return f"{'Women' if r['gender'] == 'female' else 'Men'} {r['age']} ({r['pct']:.0%})"
+
+
+# ============================================================================ final recommendation (last step)
+def _score(res: SimulationResult) -> tuple[float, float]:
+    return (round(res.win_prob, 4), res.total_delta_votes)
+
+
+def final_recommendation(ps: PlanSettings, current_json: str | None) -> dict[str, Any]:
+    """The plan to recommend given every setting so far (budget, goal, planning date, opponent inputs, message mix,
+    area amounts, platforms, timing), plus what it is compared against. All candidates are scored by the same model.
+
+    Candidates: the model's recommendation under the settings; the user's current plan if it was edited by hand or
+    by Gemini. The better one (win chance, then net votes) is recommended. When the user set area amounts, the
+    model's unconstrained plan is also scored so the cost (or gain) of those amounts is visible, but it is not
+    recommended over the user's choice."""
+    rec = recommend(ps)
+    rec_res = predict(ps, mix_key(rec))
+    out: dict[str, Any] = {"source": "model", "mix": rec, "res": rec_res, "alt": None, "free": None}
+    if current_json:
+        cur = mix_from(current_json)
+        cur_res = predict(ps, mix_key(cur))
+        if _score(cur_res) >= _score(rec_res):
+            out.update(source="current", mix=cur, res=cur_res, alt={"label": "Model's recommendation", "res": rec_res})
+        else:
+            out["alt"] = {"label": "Your edited plan", "res": cur_res}
+    if ps.area_budgets:
+        free = replace(ps, area_budgets=(), rest_free=True)
+        out["free"] = predict(free, mix_key(recommend(free)))
+    plan = plan_table(ps, out["mix"], out["res"])
+    mine = dict(area_budgets_for(ps))
+    plan["share"] = plan["budget"] / ps.budget if ps.budget > 0 else np.nan
+    plan["your_amount"] = plan["unit_id"].map(mine)
+    plan["goal_label"] = plan["goal"].map(WR.GOAL_LABELS)
+    plan["platforms"] = plan["channels"].map(lambda cs: ", ".join(WR.PLATFORM_LABELS[c] for c in cs))
+    out["table"] = plan
+    mm = messaging_mix(ps, out["mix"])
+    out["by_platform"] = mm.groupby("platform", as_index=False)[["dollars", "net_votes"]].sum().sort_values(
+        "dollars", ascending=False) if len(mm) else pd.DataFrame(columns=["platform", "dollars", "net_votes"])
+    out["by_goal"] = mm.groupby("goal", as_index=False)[["dollars", "net_votes"]].sum().sort_values(
+        "dollars", ascending=False) if len(mm) else pd.DataFrame(columns=["goal", "dollars", "net_votes"])
+    return out
+
+
+def recommendation_csv(ps: PlanSettings, rec: dict[str, Any]) -> bytes:
+    t = rec["table"]
+    df = pd.DataFrame({
+        "area": t["label"], "recommended_usd": t["budget"].round(0), "share_of_budget": t["share"].round(4),
+        "goal": t["goal_label"], "platforms": t["platforms"], "expected_net_votes": t["delta_votes"].round(0),
+        "net_votes_low_10pct": t["delta_low"].round(0), "net_votes_high_90pct": t["delta_high"].round(0),
+        "your_amount_usd": t["your_amount"].round(0)})
+    head = (f"# War Room recommendation · {RACES[ps.race]['label']} · planning date {ps.asof} · budget {ps.budget:,.0f}"
+            f" · messages: {', '.join(f'{theme_labels().get(m, m)} {w:.0%}' for m, w in ps.messages) or 'no specific theme'}"
+            f" · model, not forecast\n")
+    return (head + df.to_csv(index=False)).encode()

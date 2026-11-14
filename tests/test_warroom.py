@@ -781,3 +781,107 @@ def test_escape_is_single_pass():
     spec = importlib.util.spec_from_file_location("_wr_src", "app_pages/war_room.py")
     src = spec.loader.get_source("_wr_src")
     assert "_HTML_ENT.get(c) or _MD_ENT.get(c, c)" in src  # one pass: '#' inside &#39; is never re-escaped
+
+
+# ----------------------------------------------------------------------------- step 1: spending by area
+@needs_snapshot
+def test_area_budgets_are_honoured_and_the_rest_follows_the_toggle():
+    ab = (("CD1", 500_000.0), ("CD13", 300_000.0))
+    on = S.recommend(_ps("house", area_budgets=ab)).groupby("unit_id")["dollars"].sum()
+    assert on["CD1"] == pytest.approx(500_000, abs=1) and on["CD13"] == pytest.approx(300_000, abs=1)
+    assert on.sum() == pytest.approx(2_000_000, abs=10) and len(on) > 2
+    off = S.recommend(_ps("house", area_budgets=ab, rest_free=False)).groupby("unit_id")["dollars"].sum()
+    assert set(off.index) == {"CD1", "CD13"} and off.sum() == pytest.approx(800_000, abs=1)
+
+
+@needs_snapshot
+def test_area_budgets_over_the_budget_are_scaled_and_follow_the_budget_curve():
+    ps = _ps("house", area_budgets=(("CD1", 3_000_000.0), ("CD13", 1_000_000.0)), rest_free=False)
+    assert dict(S.area_budgets_for(ps)) == pytest.approx({"CD1": 1_500_000, "CD13": 500_000})
+    assert dict(S.area_budgets_for(ps, ps.budget / 2)) == pytest.approx({"CD1": 750_000, "CD13": 250_000})
+
+
+@needs_snapshot
+def test_unassigned_budget_is_explained():
+    ps = _ps("house", area_budgets=(("CD1", 400_000.0),), rest_free=False)
+    ctx, _, _ = S.race_context(ps)
+    mix = S.recommend(ps)
+    res = S.predict(ps, S.mix_key(mix))
+    h = S.headline(ps, ctx, res, S.messaging_mix(ps, mix), S.plan_table(ps, mix, res))
+    assert "$1.6M is not assigned to any area (step 1)" in h
+    assert ps.describe()["user_set_area_budgets_usd"] == {"CD-1": 400000}
+
+
+@needs_snapshot
+def test_step1_percent_entries_switch_to_dollars_and_drive_the_plan():
+    at = _app("house")
+    at.run()
+    at.session_state["wr_house_area_vals"] = {"CD1": 25.0}
+    at.run()
+    assert not at.exception and any("Assigned" in m.value and "25% of" in m.value for m in at.markdown)
+    at.button_group(key="wrw_house_alloc_mode").set_value("usd").run()
+    assert at.session_state["wr_house_area_vals"] == {"CD1": 500_000.0}
+    at.session_state["wrw_house_step"] = at.session_state["wrp_house_step"] = 4
+    at.run()
+    ps = _ps("house", asof=at.session_state["wrw_house_asof"], area_budgets=(("CD1", 500_000.0),))
+    want = S.predict(ps, S.mix_key(S.recommend(ps))).total_delta_votes
+    assert not at.exception and any(f"≈{want:,.0f} net votes" in m.value for m in at.markdown)
+
+
+@needs_snapshot
+def test_step1_amounts_replace_an_edited_plan():
+    at = _app("house")
+    at.session_state["wr_house_mix"] = S.mix_key(WR.region_lines("CD1", 300_000.0, "mobilization", ["meta"]))
+    at.run()
+    assert any("Step 4 currently holds an edited plan" in c.value for c in at.caption)
+
+
+# ----------------------------------------------------------------------------- step 6: recommended spending
+@needs_snapshot
+def test_final_recommendation_picks_the_better_plan():
+    ps = _ps("house")
+    rec = S.final_recommendation(ps, None)
+    assert rec["source"] == "model" and rec["alt"] is None and rec["free"] is None
+    assert rec["table"]["budget"].sum() == pytest.approx(rec["res"].total_spent)
+    worse = S.mix_key(WR.region_lines("CD5", 1_000_000.0, "persuasion", ["search"]))
+    r2 = S.final_recommendation(ps, worse)
+    assert r2["source"] == "model" and r2["alt"]["label"] == "Your edited plan"
+    better = S.mix_key(rec["mix"])  # an edited plan equal to the recommendation ties and is kept
+    assert S.final_recommendation(ps, better)["source"] == "current"
+
+
+@needs_snapshot
+def test_final_recommendation_shows_the_cost_of_area_amounts():
+    ps = _ps("house", area_budgets=(("CD5", 1_000_000.0),))
+    rec = S.final_recommendation(ps, None)
+    assert rec["free"] is not None and rec["free"].total_delta_votes >= rec["res"].total_delta_votes
+    row = rec["table"].set_index("unit_id").loc["CD5"]
+    assert row["your_amount"] == pytest.approx(1_000_000)
+    assert rec["by_platform"]["dollars"].sum() == pytest.approx(rec["res"].total_spent)
+
+
+@needs_snapshot
+def test_recommendation_csv():
+    ps = _ps("senate", messages=(("crime", 1.0),))
+    txt = S.recommendation_csv(ps, S.final_recommendation(ps, None)).decode()
+    head, cols = txt.splitlines()[:2]
+    assert head.startswith("# War Room recommendation · US Senate") and "Crime & Public Safety 100%" in head
+    assert cols.startswith("area,recommended_usd,share_of_budget,goal,platforms,expected_net_votes")
+
+
+@needs_snapshot
+@pytest.mark.parametrize("race", ["house", "senate"])
+def test_step6_and_advanced_section(race):
+    at = _app(race)
+    at.run()
+    adv = [e for e in at.expander if e.label.startswith("Advanced: set spending")]
+    assert len(adv) == 1 and not adv[0].proto.expanded
+    at.session_state[f"wrw_{race}_step"] = at.session_state[f"wrp_{race}_step"] = 6
+    at.run()
+    md = " ".join(m.value for m in at.markdown)
+    assert not at.exception and "Recommended spending" in md and "Recommended: <b>" in md
+    at.session_state[f"wr_{race}_mix"] = S.mix_key(WR.region_lines(S.load_regions(race)["unit_id"].iloc[0], 1e6,
+                                                                   "persuasion", ["search"]))
+    at.run()
+    at.button(key="wrb_use_rec").click().run()
+    assert not at.exception and at.session_state[f"wr_{race}_mix"] is None

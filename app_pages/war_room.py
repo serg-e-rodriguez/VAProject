@@ -148,6 +148,10 @@ ss.setdefault(wk("msg_themes"), [])
 for _p in ("areas", "messages", "tactics"):
     ss.setdefault(wk(f"perm_{_p}"), False)
 ss.setdefault(wk("agent_note"), "")
+ss.setdefault(wk("alloc_mode"), "pct")
+ss.setdefault(wk("alloc_rest"), True)
+ss.setdefault(k("area_vals"), {})   # step 1: {unit_id: value} in the current entry mode (% of budget or $)
+ss.setdefault(k("alloc_nonce"), 0)
 ss.setdefault(k("agent"), None)
 ss.setdefault(k("undo"), None)
 ss.setdefault(wk("ask"), "")
@@ -166,7 +170,29 @@ def current_settings() -> S.PlanSettings:
         preset=ss[wk("preset")] or "default", env=float(ss[wk("env")]),
         platforms=tuple(c for c in WR.WR_CHANNELS if c in (ss[wk("platforms")] or WR.WR_CHANNELS)),
         timing=ss[wk("timing")] or "late", opp_on=bool(ss[wk("opp_on")]), opp_lambda=float(ss[wk("opp_lambda")]),
-        messages=current_messages())
+        messages=current_messages(), area_budgets=area_budgets(), rest_free=bool(ss[wk("alloc_rest")]))
+
+
+def area_budgets() -> tuple[tuple[str, float], ...]:
+    """Step-1 entries as dollars (percent entries follow the budget)."""
+    budget = float(ss[wk("budget")])
+    f = budget / 100 if ss[wk("alloc_mode")] == "pct" else 1.0
+    return tuple(sorted((u, round(float(v) * f, 2)) for u, v in ss[k("area_vals")].items() if v and v > 0))
+
+
+def _alloc_mode_changed() -> None:
+    """Switching % <-> $ converts what the user already typed."""
+    budget = float(ss[wk("budget")]) or 1.0
+    to_pct = ss[wk("alloc_mode")] == "pct"
+    ss[k("area_vals")] = {u: round(v / budget * 100, 2) if to_pct else round(v / 100 * budget, -2)
+                          for u, v in ss[k("area_vals")].items()}
+    ss[k("alloc_nonce")] += 1
+    _persist("alloc_mode")
+
+
+def _alloc_clear() -> None:
+    ss[k("area_vals")] = {}
+    ss[k("alloc_nonce")] += 1
 
 
 def usable_themes(asof: str) -> set[str]:
@@ -241,6 +267,11 @@ def change_chart(diff: pd.DataFrame) -> alt.Chart:
         y=y, x=alt.value(4), text="lbl:N")
     zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=tok["border"]).encode(x="x:Q")
     return (zero + bars + text).properties(height=56 + 28 * len(d))
+
+
+def M6_head(ps: S.PlanSettings, ctx, rec: dict) -> str:
+    mix = rec["mix"]
+    return S.headline(ps, ctx, rec["res"], S.messaging_mix(ps, mix), rec["table"])
 
 
 def render_agent_result(out: dict) -> None:
@@ -603,7 +634,7 @@ ss["wr_view"] = "plan"
 
 # ============================================================================ PLAN VIEW (four steps)
 STEPS = {1: "Budget & spending", 2: "Opponent messaging", 3: "Our messaging", 4: "Plan & prediction",
-         5: "Gemini"}
+         5: "Gemini", 6: "Recommended spending"}
 
 
 def go_step(i: int) -> None:
@@ -690,6 +721,77 @@ if STEP == 1:
         source("Sources: Google Political Ads (BigQuery) and Meta Ad Library, race-attributed ads, NC spend pro-rated by "
                "flight days. Google ads targeted to counties are assigned there (districts via the county crosswalk); "
                "all other spend (all Meta, statewide Google) is split by registered voters.")
+
+    # ------------------------------------------------------------------ advanced: spending by area
+    st.write("")
+    n_vals = len([v for v in ss[k("area_vals")].values() if v and v > 0])
+    with st.expander(f"Advanced: set spending by {W['unit_word']}"
+                     + (f" · {n_vals} set" if n_vals else " · optional, the model decides by default"),
+                     expanded=bool(n_vals), icon=":material/tune:"):
+        st.caption(f"Set an amount for any {W['unit_word']} as a percent of the budget or in dollars; the model picks "
+                   f"the best platform and goal inside each. Leave a {W['unit_word']} blank to let the model decide. "
+                   "Step 6 shows what your amounts cost or gain against the model's own choice.")
+        a1, a2, a3 = st.columns([2.4, 3, 1.2], vertical_alignment="bottom")
+        with a1:
+            st.segmented_control("Enter amounts as", ["pct", "usd"], key=wk("alloc_mode"), on_change=_alloc_mode_changed,
+                                 format_func=lambda m: "% of budget" if m == "pct" else "$ amount")
+        with a2:
+            st.toggle(f"Let the model place the rest in other {W['units_word']}", key=wk("alloc_rest"),
+                      on_change=_persist, args=("alloc_rest",),
+                      help=f"Off: budget not assigned to a {W['unit_word']} here is not spent.")
+        with a3:
+            st.button("Clear", key="wrb_alloc_clear", on_click=_alloc_clear, width="stretch",
+                      disabled=not ss[k("area_vals")])
+        pct = ss[wk("alloc_mode")] == "pct"
+        vals = ss[k("area_vals")]
+        tbl = rs[["unit_id", "label", "dem_margin_pct", "dem", "gop", "gop_sov"]].copy()
+        tbl["value"] = tbl["unit_id"].map(vals).astype(float)
+        tbl = tbl.assign(_set=tbl["value"].notna()).sort_values(["_set", "gop"], ascending=[False, False]).drop(columns="_set")
+        edited_tbl = st.data_editor(
+            tbl, key=f"wra_{R}_{ss[k('alloc_nonce')]}", hide_index=True, width="stretch",
+            height=min(420, 38 + 35 * len(tbl)),
+            column_order=["label", "value", "dem_margin_pct", "dem", "gop", "gop_sov"],
+            disabled=["label", "dem_margin_pct", "dem", "gop", "gop_sov"],
+            column_config={
+                "label": st.column_config.TextColumn(W["unit_word"].title()),
+                "value": (st.column_config.NumberColumn("Your allocation (% of budget)", min_value=0.0, max_value=100.0,
+                                                        step=0.5, format="%.1f%%") if pct else
+                          st.column_config.NumberColumn("Your allocation ($)", min_value=0, step=10_000, format="dollar")),
+                "dem_margin_pct": st.column_config.NumberColumn("2024 margin (D−R)", format="%+.1f"),
+                "dem": st.column_config.NumberColumn("Dem spend so far", format="dollar"),
+                "gop": st.column_config.NumberColumn("GOP spend so far", format="dollar"),
+                "gop_sov": st.column_config.ProgressColumn("GOP share of voice", min_value=0.0, max_value=1.0,
+                                                           format="percent")})
+        new_vals = {r.unit_id: round(float(r.value), 2) for r in edited_tbl.itertuples()
+                    if pd.notna(r.value) and float(r.value) > 0}
+        if new_vals != {u: round(float(v), 2) for u, v in vals.items() if v and v > 0}:
+            ss[k("area_vals")] = new_vals
+            if ss[k("mix")] is not None:  # a hand-edited / Gemini plan would ignore the new amounts
+                ss[k("mix")] = None
+                ss[k("undo")] = None
+                ss[k("ed_nonce")] += 1
+            st.rerun()
+        ps = current_settings()
+        assigned = sum(v for _, v in ps.area_budgets)
+        n_set = len(ps.area_budgets)
+        if n_set:
+            rest = ps.budget - assigned
+            msg = (f"Assigned {fmt_money(assigned)} ({assigned / ps.budget:.0%} of {fmt_money(ps.budget)}) to {n_set} "
+                   f"{W['unit_word'] if n_set == 1 else W['units_word']}. ")
+            if rest < -1:
+                st.warning(msg + f"That is {fmt_money(-rest)} over budget, so each amount is scaled to "
+                                 f"{ps.budget / assigned:.0%} of what you entered.")
+            else:
+                source(msg + (f"The other {fmt_money(rest)} is placed by the model in other {W['units_word']}."
+                              if ps.rest_free else f"The other {fmt_money(rest)} is not spent."))
+            if UT == "cd" and ps.house_mode == "focus":
+                st.caption("Goal is 'Win one district': money set for other districts adds nothing to that goal, so "
+                           "the model leaves it unspent.")
+        else:
+            source(f"No amounts set: the model decides how much each {W['unit_word']} gets.")
+        if ss[k("mix")] is not None:
+            st.caption("Step 4 currently holds an edited plan. Setting amounts here replaces it with a new "
+                       "recommendation that follows them.")
     step_nav(1)
 
 # ---------------------------------------------------------------------------- step 2 · opponent messaging
@@ -982,7 +1084,7 @@ elif STEP == 4:
     step_nav(4)
 
 # ---------------------------------------------------------------------------- step 5 · Gemini
-else:
+elif STEP == 5:
     with st.spinner("Running the model…"):
         M = model_state(ps, ss[k("mix")])
     res, plan = M["res"], M["plan"]
@@ -1095,6 +1197,98 @@ else:
     if out:
         render_agent_result(out)
     step_nav(5)
+
+# ---------------------------------------------------------------------------- step 6 · recommended spending
+elif STEP == 6:
+    with st.spinner("Scoring the plans…"):
+        rec = S.final_recommendation(ps, ss[k("mix")])
+    rres, table = rec["res"], rec["table"]
+    ctx6 = S.race_context(ps)[0]
+    ww = S.win_word(ps, ctx6)
+    used = [f"{fmt_money(ps.budget)} budget", f"planning date {pd.Timestamp(ps.asof):%b %d} ({ps.weeks} wk out)",
+            ps.describe()["goal"],
+            (f"opponent strength {ps.opp_lambda:.1f}" if ps.opp_on and ps.opp_lambda > 0 else "opponent ads not counted"),
+            "messages: " + msg_text(ps.messages),
+            (f"your amounts for {len(ps.area_budgets)} {W['units_word'] if len(ps.area_budgets) != 1 else W['unit_word']}"
+             if ps.area_budgets else "areas chosen by the model"),
+            "platforms: " + ", ".join(WR.PLATFORM_SHORT[c] for c in ps.platforms)]
+    section("Recommended spending", "The plan to run, from everything set in steps 1–5: " + "; ".join(used) + ".")
+    with st.container(border=True):
+        who = ("the model's recommendation for these settings" if rec["source"] == "model" else
+               "your edited plan (it scores at least as well as the model's own recommendation)")
+        _md(f"<div class='wr-headline'>Recommended: <b>{html.escape(who)}</b>. "
+            f"{html.escape(M6_head(ps, ctx6, rec))}</div>")
+        t1, t2, t3, t4 = st.columns(4, gap="small")
+        lo, hi = rres.win_prob_interval
+        with t1:
+            kpi(ww, f"{rres.baseline_win_prob:.0%} → {rres.win_prob:.0%}", f"range {lo:.0%}–{hi:.0%}")
+        with t2:
+            a_, b_ = rres.total_delta_interval
+            kpi("Net votes gained", f"≈{fmt_num(rres.total_delta_votes)}", f"10–90%: {fmt_num(a_)}–{fmt_num(b_)}")
+        with t3:
+            kpi("Cost per net vote", fmt_money(rres.cost_per_net_vote) if rres.total_delta_votes > 0 else "—",
+                "model, not forecast")
+        with t4:
+            kpi("Budget used", fmt_money(rres.total_spent), f"of {fmt_money(ps.budget)} · {len(table)} "
+                + (W["units_word"] if len(table) != 1 else W["unit_word"]))
+        if rec["alt"]:
+            alt_res = rec["alt"]["res"]
+            dv = rres.total_delta_votes - alt_res.total_delta_votes
+            source(f"Compared with {rec['alt']['label'].lower()}: {alt_res.win_prob:.1%} win chance, "
+                   f"≈{fmt_num(alt_res.total_delta_votes)} net votes ({'+' if dv >= 0 else '−'}{fmt_num(abs(dv))} for the "
+                   "recommended plan).")
+            if rec["source"] == "model":
+                st.button("Use the model's recommendation instead of my edited plan", key="wrb_use_rec",
+                          on_click=lambda: (ss.update({k("mix"): None, k("undo"): None}),
+                                            ss.update({k("ed_nonce"): ss[k("ed_nonce")] + 1})))
+        if rec["free"] is not None:
+            fr = rec["free"]
+            dv = fr.total_delta_votes - rres.total_delta_votes
+            line = (f"If the model chose every {W['unit_word']} itself: ≈{fmt_num(fr.total_delta_votes)} net votes, "
+                    f"{fr.win_prob:.1%} win chance. ")
+            line += (f"Your area amounts cost about {fmt_num(dv)} net votes." if dv > 50 else
+                     "Your area amounts cost little or nothing." if dv > -50 else
+                     f"Your area amounts gain about {fmt_num(-dv)} net votes.")
+            st.caption(line)
+
+    st.write("")
+    with st.container(border=True):
+        _md(f"<div class='wr-card-title'>Recommended spending by {W['unit_word']}</div>")
+        cols = ["label", "budget", "share", "goal_label", "platforms", "delta_votes", "delta_low", "delta_high"]
+        cfg = {"label": st.column_config.TextColumn(W["unit_word"].title()),
+               "budget": st.column_config.NumberColumn("Recommended", format="dollar"),
+               "share": st.column_config.ProgressColumn("Share of budget", min_value=0.0,
+                                                        max_value=float(max(table["share"].max(), 0.01)) if len(table) else 1.0,
+                                                        format="percent"),
+               "goal_label": "Goal", "platforms": "Platforms",
+               "delta_votes": st.column_config.NumberColumn("Net votes (expected)", format="%d"),
+               "delta_low": st.column_config.NumberColumn("Low (10%)", format="%d"),
+               "delta_high": st.column_config.NumberColumn("High (90%)", format="%d")}
+        if ps.area_budgets:
+            cols.insert(2, "your_amount")
+            cfg["your_amount"] = st.column_config.NumberColumn("Your amount", format="dollar")
+        if len(table):
+            st.dataframe(table[cols], hide_index=True, width="stretch", column_config=cfg,
+                         height=min(460, 38 + 35 * len(table)))
+        else:
+            st.info("No money is planned under these settings.")
+        g1, g2 = st.columns(2, gap="large")
+        with g1:
+            _md("<div class='wr-label'>By platform</div>")
+            bullets([f"{r.platform}: {fmt_money(r.dollars)} ({r.dollars / max(rres.total_spent, 1):.0%}) · ≈"
+                     f"{fmt_num(r.net_votes)} net votes" for r in rec["by_platform"].itertuples()] or ["—"])
+        with g2:
+            _md("<div class='wr-label'>By goal</div>")
+            bullets([f"{r.goal}: {fmt_money(r.dollars)} ({r.dollars / max(rres.total_spent, 1):.0%}) · ≈"
+                     f"{fmt_num(r.net_votes)} net votes" for r in rec["by_goal"].itertuples()] or ["—"])
+            _md("<div class='wr-label'>Messages</div>")
+            bullets([msg_text(ps.messages)])
+        d1, d2 = st.columns([1.6, 5], vertical_alignment="center")
+        d1.download_button("Download as CSV", S.recommendation_csv(ps, rec), file_name=f"war_room_{R}_{ps.asof}.csv",
+                           mime="text/csv", key="wrb_csv", width="stretch", icon=":material/download:")
+        d2.caption("Model, not forecast: the numbers compare plans under stated assumptions. Change any step and this "
+                   "recommendation updates.")
+    step_nav(6)
 
 source("Detail by region: Region Analysis. All opponent ads: Opponent Tracker.")
 for _key in [x for x in ss if str(x).startswith(f"wrw_{R}_")]:
