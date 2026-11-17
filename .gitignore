@@ -27,3 +27,10 @@ __pycache__/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Raw downloads (rebuilt by the snapshot script)
+data/raw/
+!data/cache/manifest.json
+
+# Local War Room scenarios (user data)
+data/scenarios.db

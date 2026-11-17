@@ -1,32 +1,49 @@
 [project]
-name = "vaproject"
+name = "nc-campaign-war-room"
 version = "0.1.0"
-description = "Add your description here"
+description = "NC political ad intelligence dashboard and War Room budget simulator (Streamlit + Altair)"
 readme = "README.md"
-authors = [
-    { name = "serg-e-rodriguez", email = "sergrodo@gmail.com" }
-]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
-    "altair>=6.3.0",
-    "db-dtypes>=1.8.0",
-    "google-cloud-bigquery>=3.46.2",
-    "google-cloud-bigquery-storage>=2.43.0",
-    "pandas>=3.0.6",
-    "pyarrow>=26.0.0",
-    "python-dotenv>=1.2.4",
-    "requests>=2.34.2",
-    "streamlit>=1.66.0",
+    "streamlit>=1.40",
+    "altair>=5.4",
+    "pandas>=2.2",
+    "numpy>=2.0",
+    "pyarrow>=17.0",
+    "google-cloud-bigquery>=3.25",
+    "db-dtypes>=1.3",
+    "requests>=2.32",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
 ]
-
-[project.scripts]
-vaproject = "vaproject:main"
-
-[build-system]
-requires = ["uv_build>=0.12.12,<0.13.0"]
-build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.4.0",
+    "ipykernel>=6.29",
+    "pytest>=8.3",
+    "ruff>=0.6",
 ]
+geo = [
+    "geopandas>=1.0",
+    "pyogrio>=0.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/campaign_intel"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = ["SIM117", "BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
