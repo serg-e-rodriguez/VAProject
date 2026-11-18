@@ -1,5 +1,13 @@
 # NC Race Intelligence & War Room
 
+## App Deployment URL
+
+**➡️ <https://vaproject-team2.streamlit.app/>** (hosted on Streamlit Community Cloud)
+
+## Project Description
+
+*Visual Analytics course project. Use case: "The Midterms: Political & Issue Advertising".*
+
 A Streamlit + Altair dashboard for the **2026 North Carolina US Senate and US House races** from the Democratic
 side: where political ad money is going, what Republicans are running and who it reaches, and, in the
 **War Room**, where to spend a budget and what the model predicts it buys.
@@ -14,12 +22,13 @@ Every number comes from real public data, frozen in a local snapshot (`data/cach
 | MEDSL 2022 US Senate (`data/senate_2022.csv`) | 2022 Senate results by county and district |
 | CCES 2024 UNC module (`data/CCES24_UNC_OUTPUT.csv`) | News-source use and economic perceptions by age |
 
-## Run it locally
+## Local Setup Instructions
 
 You need [uv](https://docs.astral.sh/uv/) (it installs the right Python, 3.12 or newer, for you).
 
 ```bash
-git clone <repo-url> && cd VAProject
+git clone https://github.com/serg-e-rodriguez/VAProject.git
+cd VAProject
 uv sync                              # creates .venv and installs everything from uv.lock
 cp .env.example .env                 # optional: add keys (see below)
 uv run streamlit run app.py          # opens http://localhost:8501
