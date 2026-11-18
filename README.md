@@ -1,4 +1,4 @@
-# NC Campaign Ad Intelligence & War Room
+# NC Race Intelligence & War Room
 
 A Streamlit + Altair dashboard for the **2026 North Carolina US Senate and US House races** from the Democratic
 side: where political ad money is going, what Republicans are running and who it reaches, and, in the
@@ -93,7 +93,7 @@ Raw downloads are cached in `data/raw/` (git-ignored). The build writes `data/ca
 `manifest.json`. Which advertisers count as Democratic or Republican is set in `seeds/advertiser_sides.csv`;
 change it and rebuild to re-classify ads.
 
-## Project layout
+## Project Layout
 
 ```
 app.py                      sidebar: race picker, navigation, theme
@@ -122,7 +122,7 @@ The tests check that the snapshot reconciles to certified totals, that the model
 reproducible, and they drive the War Room and Opponent Tracker pages headlessly (Streamlit AppTest). They
 make no network calls: Gemini and the link checks are mocked.
 
-## Known limits
+## Known Limits
 
 The War Room is a model, not a forecast: ad-effect sizes, costs and decay are set ranges, so use it to compare
 plans. Message themes enter only through who their ads reach and how much Republicans spend on them; how
