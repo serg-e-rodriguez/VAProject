@@ -23,7 +23,9 @@ REAL_CHECK_AD_LINK = S.check_ad_link
 @pytest.fixture(autouse=True)
 def _no_network_link_checks(monkeypatch):
     """Page tests must not call Google or Meta; the link checker has its own tests below."""
-    monkeypatch.setattr(S, "check_ad_link", lambda *a, **k: ("", "not checked in tests"))
+    from campaign_intel.data import ad_links
+
+    monkeypatch.setattr(ad_links, "check_ad_link", lambda *a, **k: ("", "not checked in tests"))
 
 
 @pytest.fixture
