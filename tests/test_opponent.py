@@ -11,7 +11,8 @@ needs_snapshot = pytest.mark.skipif(not L.snapshot_ready(), reason="snapshot not
 
 
 def _cards(at):
-    return [m.value for m in at.markdown if "class='adcard'" in m.value]
+    """Advertiser headings of the ad cards (bold line that names the Republican side)."""
+    return [m.value for m in at.markdown if m.value.startswith("**") and "Republican\\:" in m.value]
 
 
 @needs_snapshot
@@ -32,10 +33,11 @@ def test_only_republican_ads_with_checked_links(race, monkeypatch):
     assert not at.exception
     cards = _cards(at)
     assert cards and len(calls) == len(cards)
-    assert all("Republican:" in c.split("<b>")[1].split("</b>")[0] for c in cards)
-    with_link = [c for c in cards if "https://example.org/ok" in c]
-    assert len(with_link) == (len(cards) + 1) // 2  # unconfirmed links are not shown
-    assert all("render_ad" not in c for c in cards)  # the stored Meta snapshot links (404 for people) never appear
+    buttons = at.get("link_button")
+    assert len(buttons) == (len(cards) + 1) // 2  # unconfirmed links are not shown
+    assert all(btn.proto.url == "https://example.org/ok" for btn in buttons)
+    assert not any("<a " in m.value for m in at.markdown)  # no raw-HTML links (the browser dropped those cards)
+    assert not any("render_ad" in m.value for m in at.markdown)  # stored Meta snapshot links (404) never appear
     gop_ids = set(L.load_ads(race).query("side_group == 'GOP side'")["ad_id"])
     assert set(calls) <= gop_ids
 

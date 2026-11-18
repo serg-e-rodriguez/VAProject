@@ -65,17 +65,25 @@ def ad_card(advertiser: str, date: str, body: str, spend: str, platform: str, ur
         body = "Video / image ad — open it in the ad library to view the creative."
     if len(body) > 260:
         body = body[:257].rsplit(" ", 1)[0] + "…"
-    tags = "".join(f"<span class='tag'>{html.escape(t)}</span>" for t in (themes or [])[:3])
-    aud = f"<span>Mostly reached: <b>{html.escape(audience)}</b></span>" if audience else ""
-    link = f"<a href='{html.escape(url)}' target='_blank'>Open in {html.escape(platform)} library ↗</a>" if url else ""
-    _md(
-        "<div class='adcard'>"
-        f"<div class='adcard-head'><b>{html.escape(advertiser)}</b><span>{html.escape(platform)} · {html.escape(date)}</span></div>"
-        f"<div class='adcard-body'>{html.escape(body)}</div>"
-        f"<div class='adcard-tags'>{tags}</div>"
-        f"<div class='adcard-foot'><span>Spend <b>{html.escape(spend)}</b></span>{aud}{link}</div>"
-        "</div>"
-    )
+    # Built from Streamlit's own elements, not one raw-HTML block: on the deployed app the raw-HTML card (with an
+    # <a target=_blank> inside) was dropped by the browser, leaving an empty space. Text is markdown-escaped.
+    with st.container(border=True):
+        st.markdown(f"**{_esc_md(advertiser)}**")
+        st.caption(f"{_esc_md(platform)} · {_esc_md(date)}")
+        st.markdown(_esc_md(body))
+        if themes:
+            st.caption(" · ".join(_esc_md(t).upper() for t in themes[:3]))
+        st.caption(f"Spend **{_esc_md(spend)}**" + (f" · Mostly reached: **{_esc_md(audience)}**" if audience else ""))
+        if url:
+            st.link_button(f"Open in {platform} library ↗", url)
+
+
+_MD_SPECIAL = set("\\`*_{}[]()<>#+-.!|~$:")
+
+
+def _esc_md(text: str) -> str:
+    """Escape markdown, emoji-shortcode and LaTeX characters so ad text shows exactly as written."""
+    return "".join("\\" + c if c in _MD_SPECIAL else c for c in " ".join(str(text).split()))
 
 
 def chart(c, **kwargs):
