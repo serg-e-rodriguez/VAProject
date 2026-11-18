@@ -37,6 +37,11 @@ uv run streamlit run app.py          # opens http://localhost:8501
 No credentials are needed to run the app: the committed snapshot has all the data. The keys in `.env`
 only switch on optional features. Use the sidebar to pick the race (US Senate or US House) and a page.
 
+### Dev Container / GitHub Codespaces
+
+The repo includes `.devcontainer/devcontainer.json`. Open it in a Codespace (or VS Code's "Reopen in Container"):
+it uses Python 3.12, runs `uv sync`, and starts the app on port 8501 with `uv run streamlit run app.py`.
+
 ## The `.env` file
 
 `.env` sits in the project root, is loaded automatically at start-up (python-dotenv), and is git-ignored.
@@ -113,16 +118,27 @@ app.py                      sidebar: race picker, navigation, theme
 app_pages/                  overview.py, regions.py, opponent.py, war_room.py
 src/campaign_intel/
   config.py                 paths, .env loading, race definitions
-  ingest/                   ncsbe.py, google_ads.py, meta_ads.py, build_snapshot.py
-  data/                     snapshot.py (parquet reader), loaders.py (cached loaders), ad_links.py (link checks), bq.py
-  processing/               ads.py (sides, themes, weekly), survey.py (CCES), themes.py, crosswalk.py
+  state.py                  session state and URL query-param sync (deep links)
+  ingest/                   ncsbe.py, google_ads.py, meta_ads.py, regions.py, reference.py, build_snapshot.py
+  data/                     snapshot.py (parquet reader), loaders.py (cached loaders), ad_links.py (link checks),
+                            bq.py (BigQuery client: Streamlit secrets, then Application Default Credentials)
+  processing/               ads.py (sides, themes, weekly), bands.py (spend/impression ranges), survey.py (CCES),
+                            themes.py, crosswalk.py
   model/                    engine.py (Monte Carlo), optimizer.py, warroom.py, assumptions.py, scenarios.py
   war_room_service.py       War Room: plan, predict, opponent and message inputs, Gemini client
   viz/                      charts.py, maps.py, themes.py (Altair)
-  ui/                       components and styles
+  ui/                       components.py, styles.py
+data/
+  cache/                    the committed snapshot (*.parquet, manifest.json)
+  geo/                      simplified GeoJSON for counties and districts, NC ZIP-to-county table
 seeds/                      advertiser_sides.csv, theme_keywords.yaml, assumptions_default.yaml
-tests/                      data reconciliation, model properties, War Room and Opponent Tracker pages
+tests/                      data reconciliation, model properties, charts, BigQuery credentials,
+                            War Room and Opponent Tracker pages
 notebooks/                  EDA and sanity notebooks on the snapshot
+.streamlit/                 config.toml (theme), secrets.toml.example (BigQuery credentials template)
+.devcontainer/              Codespaces / Dev Container setup
+PROJECT_DESIGN.md           design doc: data sources, processing rules, War Room model (cited by section in code)
+UI_Design.md                UI spec: layout, design tokens, chart and map styling
 ```
 
 ## Tests
@@ -132,8 +148,9 @@ uv run pytest
 ```
 
 The tests check that the snapshot reconciles to certified totals, that the model is monotone, concave and
-reproducible, and they drive the War Room and Opponent Tracker pages headlessly (Streamlit AppTest). They
-make no network calls: Gemini and the link checks are mocked.
+reproducible, that BigQuery credentials are read from Streamlit secrets first and Application Default Credentials
+otherwise, and they drive the War Room and Opponent Tracker pages headlessly (Streamlit AppTest). They make no
+network calls: Gemini, BigQuery and the link checks are mocked.
 
 ## Known Limits
 
