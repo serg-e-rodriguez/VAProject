@@ -6,6 +6,8 @@ messages, aimed at whom — and their latest ads.
 import pandas as pd
 import streamlit as st
 
+from campaign_intel.config import RACES
+from campaign_intel.data.ad_links import checked_links, link_summary
 from campaign_intel.data.loaders import (
     audience_by_side,
     channel_by_side,
@@ -19,11 +21,16 @@ from campaign_intel.data.loaders import (
     weekly_by_channel,
     went_dark,
 )
-from campaign_intel.config import RACES
 from campaign_intel.processing.themes import theme_labels
 from campaign_intel.state import race, theme
-from campaign_intel.ui.components import chart, ad_card, bullets, kpi, page_header, section, source
-from campaign_intel.viz.charts import age_reach, channel_weeks, ranked_bars, side_pair_bars, theme_compare
+from campaign_intel.ui.components import ad_card, bullets, chart, kpi, page_header, section, source
+from campaign_intel.viz.charts import (
+    age_reach,
+    channel_weeks,
+    ranked_bars,
+    side_pair_bars,
+    theme_compare,
+)
 
 R, T = race(), theme()
 labels = theme_labels()
@@ -143,11 +150,26 @@ with st.container(border=True):
     if pf != "All":
         view = view[view["platform"] == pf]
     view = view.drop_duplicates(subset=["advertiser", "body"]) if len(view) else view
-    st.caption(f"{len(view):,} ads · newest first · showing up to 12")
+    # Only Republican-side ads: the Republican nominee's campaign and allied Republican candidates, party
+    # committees and PACs, classified by advertiser (seeds/advertiser_sides.csv). Unclassified ads are left out.
+    view = view[view["side_group"] == "GOP side"]
+    shown = view.head(12)
+    with st.spinner("Checking ad links…"):
+        links = checked_links(shown) if len(shown) else {}
+    st.caption(f"{len(view):,} Republican ads · newest first · showing up to 12"
+               + (f" · {link_summary(links)}" if links else ""))
     cols = st.columns(2, gap="medium")
-    for i, r in enumerate(view.head(12).itertuples()):
+    for i, r in enumerate(shown.itertuples()):
         band = f"≥ ${r.spend_low:,.0f}" if r.open_ended else f"${r.spend_low:,.0f}–${r.spend_high:,.0f}"
+        url, note = links.get(str(r.ad_id), ("", "not checked"))
+        body = r.body if isinstance(r.body, str) and r.body.strip() else (
+            "Video / image ad with no text in the library." + ("" if url else " Its library link could not be "
+                                                                              "confirmed, so it is not shown."))
         with cols[i % 2]:
-            ad_card(r.advertiser, f"{r.start:%b %d}", r.body, band, r.platform, r.url,
+            ad_card(f"{r.advertiser} · Republican: {r.side_label}", f"{r.start:%b %d}", body, band, r.platform, url,
                     audience=r.top_audience if isinstance(r.top_audience, str) else None,
                     themes=[labels.get(t, t) for t in r.message_themes])
+            source(f"Link: {note}.")
+    source("Republican side = the Republican nominee's campaign plus allied Republican candidates, party committees and "
+           "PACs, classified by advertiser name. Links are checked before they are shown: Google links must load; Meta "
+           "ads are confirmed through the Meta Ad Library API and link to the public Ad Library page.")
