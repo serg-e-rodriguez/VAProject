@@ -18,8 +18,6 @@ import logging
 import numpy as np
 import pandas as pd
 
-from campaign_intel.config import GCP_PROJECT_ID
-
 logger = logging.getLogger(__name__)
 
 ADS = "bigquery-public-data.google_political_ads"
@@ -28,9 +26,9 @@ NC_FOCUS_MIN = 0.9
 
 
 def _client():
-    from google.cloud import bigquery
+    from campaign_intel.data.bq import make_client
 
-    return bigquery.Client(project=GCP_PROJECT_ID)
+    return make_client()
 
 
 def _query(client, sql: str) -> pd.DataFrame:

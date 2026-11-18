@@ -49,9 +49,13 @@ Start from `.env.example`. Restart Streamlit after changing it.
 | `META_AD_TOKEN` | Checking Meta ad links before they are shown (War Room steps 2–3, Opponent Tracker), and rebuilding the Meta part of the snapshot. A Meta Ad Library API access token for an identity-verified account. | Meta ad cards still show, but without a link (it can't be confirmed). Google links are checked without a key. |
 | `GCP_PROJECT_ID` | Rebuilding the Google part of the snapshot (BigQuery). Your Google Cloud project for query billing. | Only matters for a rebuild. |
 
-BigQuery uses Google's Application Default Credentials: run `gcloud auth application-default login` once, or
-set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key file. Keys are never logged; the Gemini key is sent
-only in a request header.
+BigQuery credentials are taken from Streamlit secrets first: a `[gcp_service_account]` table with a
+service-account key, plus an optional `GCP_PROJECT_ID` (template: `.streamlit/secrets.toml.example`). On Streamlit
+Community Cloud, paste these into the app's **Settings → Secrets**; locally, use `.streamlit/secrets.toml`
+(git-ignored). Without secrets, Google's Application Default Credentials are used: run
+`gcloud auth application-default login` once, or set `GOOGLE_APPLICATION_CREDENTIALS` to a key file. Top-level
+secrets such as `GEMINI_API` and `META_AD_TOKEN` also work on Streamlit Cloud (Streamlit exposes them as
+environment variables). Keys are never logged; the Gemini key is sent only in a request header.
 
 Example:
 
