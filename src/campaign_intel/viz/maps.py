@@ -50,7 +50,8 @@ def choropleth(unit_type: str, df_metrics: pd.DataFrame, metric_col: str, metric
                swing_pts: float | None = 5.0, height: int = 420, selectable: bool = True,
                domain_max: float | None = None) -> alt.Chart:
     """
-    scale: 'diverging' (Dem blue / GOP red around 0) or 'sequential' (one hue, light->dark).
+    scale: 'diverging' (Dem blue / GOP red around 0), 'sequential' (light -> Dem blue, for Democratic
+    quantities) or 'sequential_neutral' (light -> amber, for anything that is not party data).
     extra_tooltips: [(column, title, d3-format)] added to the tooltip.
     """
     t = get_tokens(theme)
@@ -78,7 +79,10 @@ def choropleth(unit_type: str, df_metrics: pd.DataFrame, metric_col: str, metric
         m = domain_max or max(5.0, float(df_metrics[metric_col].abs().quantile(0.95)))
         mid = "#ECEAF0" if theme == "light" else "#4A4F5C"
         color_scale = alt.Scale(domain=[-m, 0, m], range=[t["rep"], mid, t["dem"]], clamp=True, interpolate="lab")
-    else:
+    elif scale == "sequential_neutral":  # not party data, so not blue: blue and red mean Democrats / Republicans
+        lo = "#F4F1E8" if theme == "light" else "#2A2822"
+        color_scale = alt.Scale(range=[lo, t["neutral_series"]], zero=False, nice=False)
+    else:  # Democratic quantities (e.g. Democrats to turn out, our planned dollars)
         lo = "#E8EEFC" if theme == "light" else "#232B3D"
         color_scale = alt.Scale(range=[lo, t["dem"]], zero=False, nice=False)
 

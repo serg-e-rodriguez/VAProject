@@ -592,6 +592,22 @@ def test_page_applies_gemini_changes_only_when_better_and_can_undo():
     assert at.session_state["wrw_house_msg_themes"] == []
 
 
+@needs_snapshot
+def test_page_says_no_change_when_gemini_restates_the_plan():
+    """A proposal that scores the same because it changes nothing is reported as 'kept your plan', not applied."""
+    at = _app("house")
+    at.session_state["wrw_house_step"] = at.session_state["wrp_house_step"] = 5
+    at.session_state["wrw_house_perm_messages"] = at.session_state["wrp_house_perm_messages"] = True
+    at.run()
+    same = {"messages": [], "rationale": ["r"], "expected_effect": "e"}
+    with mock.patch.object(S, "call_gemini", return_value=(json.dumps(same), "m")):
+        at.button(key="wrb_agent").click().run()
+    out = at.session_state["wr_house_agent"]
+    assert not at.exception and out["unchanged"] and not out["applied"]
+    assert "Gemini kept your plan (no changes)" in " ".join(m.value for m in at.markdown)
+    assert not at.session_state["wr_house_undo"] if "wr_house_undo" in at.session_state else True
+
+
 # ----------------------------------------------------------------------------- regressions from the third review
 @needs_snapshot
 def test_theme_fit_is_one_for_an_audience_shaped_like_the_electorate():

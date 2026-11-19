@@ -2,9 +2,9 @@
 Overview: where the race stands, who is spending, and the electorate we have to win.
 """
 
-import pandas as pd
 import streamlit as st
 
+from campaign_intel import model_check as M
 from campaign_intel.data.loaders import (
     channel_by_side,
     fmt_margin,
@@ -16,13 +16,32 @@ from campaign_intel.data.loaders import (
     path_to_win,
     senate_nominees,
     spend_summary,
+    timeframe_label,
     top_advertisers,
     weekly_by_side,
     went_dark,
 )
 from campaign_intel.state import race, theme
-from campaign_intel.ui.components import chart, bullets, callout, kpi, page_header, section, source
-from campaign_intel.viz.charts import district_board, ranked_bars, registered_vs_voted, side_pair_bars, weekly_sides
+from campaign_intel.ui.components import (
+    bullets,
+    callout,
+    chart,
+    kpi,
+    no_data,
+    page_header,
+    party_tone,
+    pct,
+    section,
+    source,
+    timeframe_banner,
+)
+from campaign_intel.viz.charts import (
+    district_board,
+    ranked_bars,
+    registered_vs_voted,
+    side_pair_bars,
+    weekly_sides,
+)
 
 R, T = race(), theme()
 sw = load_statewide()
@@ -40,16 +59,22 @@ else:
     page_header("US House · 14 congressional districts",
                 "Where the seats stand, who is spending, and the voters we need in each district.")
 
+cov = timeframe_banner(R)
+TF = timeframe_label()
 k1, k2, k3, k4 = st.columns(4, gap="small")
 with k1:
-    kpi("Ad spend in this race", fmt_money(s["partisan"]),
-        f"Democrats {fmt_money(s['dem'])} · Republicans {fmt_money(s['gop'])}",
-        help="Google + Meta political ads attributed to this race, NC share, since Jul 1, 2026.")
+    if s["partisan"]:
+        kpi("Ad spend in this race", fmt_money(s["partisan"]),
+            f"Democrats {fmt_money(s['dem'])} · Republicans {fmt_money(s['gop'])}",
+            help=f"Google + Meta political ads attributed to this race, NC share, {TF}.")
+    else:
+        kpi("Ad spend in this race", "No data", f"No race ads found in {TF}")
 with k2:
     d4 = (s["dem_share_4w"] - s["dem_share_prev4w"]) * 100
-    kpi("Our share of the ad war", f"{s['dem_share']:.0%}",
-        f"Last 4 weeks {s['dem_share_4w']:.0%} ({d4:+.0f} pts vs the 4 before)",
-        tone="good" if s["dem_share"] >= 0.5 else "bad",
+    kpi("Our share of the ad war", pct(s["dem_share"]) if s["partisan"] else "No data",
+        f"Last 4 weeks {pct(s['dem_share_4w'])} ({pct(d4, signed=True)} vs the 4 before)" if s["partisan"]
+        else "Nothing to compare in this timeframe",
+        tone="dem" if s["partisan"] else "neutral",
         help="Democratic-side share of all Dem + GOP spend in this race.")
 if R == "senate":
     ptw = path_to_win(state_margin, sw["voted22_total"], pt)
@@ -57,38 +82,46 @@ if R == "senate":
         kpi("Where we start", fmt_margin(state_margin),
             f"2024 president in NC · ≈{fmt_num(abs(ptw['gap']))} net votes to "
             f"{'make up' if ptw['gap'] > 0 else 'protect'} in a midterm",
-            tone="bad" if state_margin < 0 else "good",
+            tone=party_tone(state_margin),
             help="2024 presidential margin applied to a 2022-sized midterm electorate.")
-    res = (sw["sen26_dem"] - sw["sen26_rep"]) / sw["sen26_total"] * 100
+    est = M.estimates(R)
+    est_pct = est["proj_votes"].sum() / est["proj_turnout"].sum() * 100
     with k4:
-        kpi("2026 result (unofficial)", fmt_margin(res),
-            f"{nom['dem']} {sw['sen26_dem'] / sw['sen26_total']:.1%} · {nom['rep']} {sw['sen26_rep'] / sw['sen26_total']:.1%}",
-            tone="good" if res > 0 else "bad", help=f"NCSBE precinct results file of {sw['sen26_file_date']}.")
+        kpi("Model estimate", fmt_margin(est_pct),
+            f"Before new ads · {M.baseline_win_prob(R):.0%} chance to win · national mood {M.DEFAULT_ENV:+.0f} pts",
+            tone=party_tone(est_pct),
+            help="The model's baseline: 2024 margin on a midterm-sized electorate, shifted by the national-mood "
+                 "assumption, before any new ad spending. Model Check compares it with the 2026 result.")
 else:
     lean_d = int((regions["dem_margin_pct"] > 0).sum())
     battle = int((regions["dem_margin_pct"].abs() < 8).sum())
     held_d = int((regions["held_by_2024"] == "Dem").sum())
-    won_d = int((regions["result26_margin_pct"] > 0).sum())
+    regions = regions.merge(M.estimates(R)[["unit_id", "proj_pct"]], on="unit_id", how="left")
+    fav_d = int((regions["proj_pct"] > 0).sum())
     with k3:
         kpi("Where we start", f"{lean_d} of 14 lean D",
-            f"By 2024 president margin · {battle} battlegrounds within 8 pts", tone="bad" if lean_d < 7 else "good")
+            f"By 2024 president margin · {battle} battlegrounds within 8 pts", tone="dem")
     with k4:
-        kpi("2026 result (unofficial)", f"D {won_d} – R {14 - won_d}",
-            f"Seats held after 2024: D {held_d} – R {14 - held_d}", tone="good" if won_d >= 7 else "bad",
-            help="NCSBE 2026 precinct results, US House contests.")
+        kpi("Model estimate", f"D {fav_d} – R {14 - fav_d}",
+            f"Seats each side is favoured in before new ads · held after 2024: D {held_d} – R {14 - held_d}",
+            tone=party_tone(fav_d - 7),
+            help="The model's baseline per district: 2024 margin on a midterm-sized electorate, shifted by the "
+                 "national-mood assumption, before any new ad spending.")
 
 # ----------------------------------------------------------------------------- House: district board
 if R == "house":
     st.markdown("<div class='group-title'>The seats</div>", unsafe_allow_html=True)
     with st.container(border=True):
-        section("District by district: where we started and where we finished",
+        section("District by district: where we start and where the model has us",
                 "Hollow dot = 2024 presidential margin on the new lines (our starting point). "
-                "Solid dot = 2026 House result. Shaded band = within 5 points.")
-        chart(district_board(regions, T))
-        flips = regions[(regions["held_by_2024"] == "Rep") & (regions["result26_margin_pct"] > 0)]
-        if len(flips):
-            source(f"Flipped from Republican to Democrat in 2026: {', '.join(flips['label'])}. "
-                   "Results are unofficial (NCSBE results file).")
+                f"Solid dot = the model's estimate (national mood {M.DEFAULT_ENV:+.0f} pts, before new ads). "
+                "Shaded band = within 5 points.")
+        chart(district_board(regions, T, end_col="proj_pct", end_title="Model estimate",
+                             end_words=("Dem favoured", "Rep favoured")))
+        close = regions[(regions["held_by_2024"] == "Rep") & (regions["proj_pct"].abs() < 8)]
+        if len(close):
+            source(f"Republican-held seats within 8 points in the model: {', '.join(close['label'])}. "
+                   "These are the pickup targets.")
 
 # ----------------------------------------------------------------------------- money
 st.markdown("<div class='group-title'>The money</div>", unsafe_allow_html=True)
@@ -96,10 +129,15 @@ c1, c2 = st.columns([7, 5], gap="medium")
 with c1, st.container(border=True):
     section("Who is out-spending whom, week by week", "Ad spend per week on Google and Meta, by side.")
     w = weekly_by_side(R)
-    chart(weekly_sides(w, T))
+    if w.empty:
+        no_data(f"No weekly ad spend in {TF}.", "Pick a longer or later timeframe in the sidebar.")
+    else:
+        chart(weekly_sides(w, T))
     gop_trend = (s["gop_4w"] / s["gop_prev4w"] - 1) * 100 if s["gop_prev4w"] else 0
     dark = went_dark(s)
-    if dark:
+    if w.empty:
+        pass
+    elif dark:
         callout(f"Republicans have gone dark online since {dark}",
                 f"No Republican Google or Meta ads (≥ $1K) in this race since {dark}. Last 4 weeks: "
                 f"Democrats {fmt_money(s['dem_4w'])}, Republicans {fmt_money(s['gop_4w'])}.", tone="dem")
@@ -109,14 +147,20 @@ with c1, st.container(border=True):
 with c2, st.container(border=True):
     section("Biggest spenders", "Top 10 committees and PACs in this race.")
     top = top_advertisers(R, n=10)
-    chart(ranked_bars(top, "advertiser", "spend", T, height=320))
+    if top.empty:
+        no_data(f"No Democratic or Republican advertisers in {TF}.")
+    else:
+        chart(ranked_bars(top, "advertiser", "spend", T, height=320))
 
 c3, c4 = st.columns([5, 7], gap="medium")
 with c3, st.container(border=True):
     section("Where each side puts its money", "Share of each side's spend by platform.")
     ch = channel_by_side(R)
     order = ch.groupby("channel")["spend"].sum().sort_values(ascending=False).index.tolist()
-    chart(side_pair_bars(ch, "channel", "share", T, order=order))
+    if ch.empty:
+        no_data(f"No platform spend in {TF}.")
+    else:
+        chart(side_pair_bars(ch, "channel", "share", T, order=order))
 with c4, st.container(border=True):
     section("What the spending tells us")
     piv = ch.pivot_table(index="channel", columns="side_group", values="share", fill_value=0)
@@ -139,8 +183,11 @@ with c4, st.container(border=True):
     t_gop = top[top["side_group"] == "GOP side"]
     if len(t_gop):
         items.append(f"Largest Republican spender: {t_gop.iloc[0]['advertiser']} ({fmt_money(t_gop.iloc[0]['spend'])}).")
-    bullets(items)
-    source(f"Spend is Google + Meta political ads attributed to this race, NC share only, since Jul 1, 2026 "
+    if items:
+        bullets(items)
+    else:
+        no_data(f"No ad spend to compare in {TF}.")
+    source(f"Spend is Google + Meta political ads attributed to this race, NC share only, {TF} "
            f"(midpoints of the ranges the platforms report). Not included: {fmt_money(s['other_races'])} from party "
            f"committees, issue groups and state/local races, and {fmt_money(s['unclassified'])} in this race from "
            f"groups we could not place on a side.")

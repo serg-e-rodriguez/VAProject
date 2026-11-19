@@ -8,9 +8,11 @@
 
 *Visual Analytics course project. Use case: "The Midterms: Political & Issue Advertising".*
 
-A Streamlit + Altair dashboard for the **2026 North Carolina US Senate and US House races** from the Democratic
-side: where political ad money is going, what Republicans are running and who it reaches, and, in the
-**War Room**, where to spend a budget and what the model predicts it buys.
+A Streamlit + Altair dashboard for **planning a midterm campaign** in the North Carolina US Senate and US House
+races (2026 cycle) from the Democratic side: where political ad money is going, what Republicans are running and
+who it reaches, and, in the **War Room**, where to spend a budget and what the model predicts it buys. The
+planning pages use only what is known before Election Day; the 2026 results appear only on the **Model Check**
+page, as a test of how accurate the model's estimate was.
 
 Every number comes from real public data, frozen in a local snapshot (`data/cache/`, committed):
 
@@ -35,7 +37,15 @@ uv run streamlit run app.py          # opens http://localhost:8501
 ```
 
 No credentials are needed to run the app: the committed snapshot has all the data. The keys in `.env`
-only switch on optional features. Use the sidebar to pick the race (US Senate or US House) and a page.
+only switch on optional features.
+
+Use the sidebar to pick the race (US Senate or US House), the **timeframe** of ad data to analyze, and a page.
+The timeframe limits everything built from Google ads (BigQuery) and the Meta Ad Library to ad delivery inside it
+(each ad's spend is pro-rated by its days inside the range). It filters the committed snapshot, which holds Google
+ads from Jul 1, 2025 and Meta ads from Jan 16, 2025 through Nov 5, 2026; it does not re-query the APIs. The sidebar
+shows, per source, how many ads fall inside the timeframe or "No data found in this timeframe" with the dates the
+snapshot holds, and each page marks sections that have nothing to show. NCSBE election, registration and turnout
+files are fixed vintages and are not filtered. The War Room keeps its own planning date.
 
 ### Dev Container / GitHub Codespaces
 
@@ -76,9 +86,12 @@ can take up to a minute or two.
 
 ## Pages
 
-- **Overview**: race spend by side, share of voice, the map, weekly spend, top advertisers.
-- **Region Analysis**: pick a county (Senate) or district (House) on the map to open its Audience Analysis:
-  registration and turnout by age, race and gender, why it leans the way it does, and who advertises there.
+- **Overview**: where we start (2024 margin), the model's estimate before new ads, race spend by side, share of
+  voice, weekly spend, top advertisers.
+- **Region Analysis**: colour the map by 2024 lean, the model's estimate, 2022 turnout, Democrats to turn out or
+  ad edge (rest the pointer on an option for a description). Pick a county (Senate) or district (House) on the
+  map or from the list to open its Audience Analysis: registration and turnout by age, race and gender, why it
+  leans the way it does, and who advertises there.
 - **Opponent Tracker**: Republican spend by week and platform, who pays for it, what they say and who sees it,
   and their latest ads. Only Republican-side ads are shown, each labeled with its campaign, party committee or
   PAC, and only links that were checked.
@@ -96,6 +109,9 @@ can take up to a minute or two.
      well, and can be undone.
   6. **Recommended spending**: the final plan from all the settings above, compared with your edited plan and
      with the model's unconstrained choice, with a CSV download.
+- **Model Check**: the model's estimate for every area (2024 margin on a midterm-sized electorate, shifted by the
+  national-mood setting, before new ads) next to the 2026 result: areas called right, average miss, and the
+  national mood the results imply. A slider shows how the misses change with the mood setting.
 
 ## Rebuilding the data snapshot
 
@@ -114,8 +130,8 @@ change it and rebuild to re-classify ads.
 ## Project Layout
 
 ```
-app.py                      sidebar: race picker, navigation, theme
-app_pages/                  overview.py, regions.py, opponent.py, war_room.py
+app.py                      sidebar: race picker, timeframe picker and data checks, navigation, theme
+app_pages/                  overview.py, regions.py, opponent.py, war_room.py, model_check.py
 src/campaign_intel/
   config.py                 paths, .env loading, race definitions
   state.py                  session state and URL query-param sync (deep links)
@@ -126,14 +142,15 @@ src/campaign_intel/
                             themes.py, crosswalk.py
   model/                    engine.py (Monte Carlo), optimizer.py, warroom.py, assumptions.py, scenarios.py
   war_room_service.py       War Room: plan, predict, opponent and message inputs, Gemini client
+  model_check.py            model estimate vs the 2026 results (Model Check page)
   viz/                      charts.py, maps.py, themes.py (Altair)
   ui/                       components.py, styles.py
 data/
   cache/                    the committed snapshot (*.parquet, manifest.json)
   geo/                      simplified GeoJSON for counties and districts, NC ZIP-to-county table
 seeds/                      advertiser_sides.csv, theme_keywords.yaml, assumptions_default.yaml
-tests/                      data reconciliation, model properties, charts, BigQuery credentials,
-                            War Room and Opponent Tracker pages
+tests/                      data reconciliation, model properties, charts, BigQuery credentials, timeframe
+                            filtering, War Room, Opponent Tracker, Region Analysis, Overview and Model Check pages
 notebooks/                  EDA and sanity notebooks on the snapshot
 .streamlit/                 config.toml (theme), secrets.toml.example (BigQuery credentials template)
 .devcontainer/              Codespaces / Dev Container setup
@@ -149,8 +166,9 @@ uv run pytest
 
 The tests check that the snapshot reconciles to certified totals, that the model is monotone, concave and
 reproducible, that BigQuery credentials are read from Streamlit secrets first and Application Default Credentials
-otherwise, and they drive the War Room and Opponent Tracker pages headlessly (Streamlit AppTest). They make no
-network calls: Gemini, BigQuery and the link checks are mocked.
+otherwise, that the timeframe limits the ad data and empty timeframes are marked "No data found", and they drive
+the War Room, Opponent Tracker, Region Analysis, Overview and Model Check pages headlessly (Streamlit AppTest).
+They make no network calls: Gemini, BigQuery and the link checks are mocked.
 
 ## Known Limits
 
@@ -158,5 +176,7 @@ The War Room is a model, not a forecast: ad-effect sizes, costs and decay are se
 plans. Message themes enter only through who their ads reach and how much Republicans spend on them; how
 persuasive an ad is is not modeled. Meta does not report spend below state level, so only county-targeted
 Google ads can be mapped to areas. Google ads carry no text, so themes come from Meta only. Ad-library spend and
-impressions are reported as ranges (midpoints are used). The CCES sample is national. The 2026 results are
-NCSBE's unofficial election-week file.
+impressions are reported as ranges (midpoints are used). The CCES sample is national. The 2026 results (Model
+Check only) are NCSBE's unofficial election-week file.
+
+Colours: blue always means Democrats and red always means Republicans; nothing else uses them.
