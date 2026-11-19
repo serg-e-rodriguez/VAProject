@@ -286,7 +286,12 @@ def render_agent_result(out: dict) -> None:
             u1.button("Undo Gemini's last change", key="wrb_undo", on_click=undo_agent, width="stretch")
         else:
             u2.caption("Undo is off: the plan or messages changed after Gemini's edit.")
-    title = "What Gemini changed" if out["applied"] else "What Gemini proposed (not applied: the model scored it lower)"
+    if out.get("unchanged"):
+        title = "Gemini kept your plan (no changes)"
+    elif out["applied"]:
+        title = "What Gemini changed"
+    else:
+        title = "What Gemini proposed (not applied: the model scored it lower)"
     section(title, f"{out['model']} · {len(out['rounds'])} round(s) · allowed: "
             + ", ".join(S.PERMISSIONS[p_].split(" (")[0].lower() for p_ in out["permissions"]))
     with st.container(border=True):
@@ -1012,7 +1017,7 @@ elif STEP == 4:
                 if len(plan) > 10:
                     source(f"Plus {len(plan) - 10} more {W['units_word']} with {fmt_money(plan['budget'].iloc[10:].sum())}.")
             else:
-                st.info("No money is planned. Reset to the recommended plan or add rows under 'Adjust the plan'.")
+                st.warning("No money is planned. Reset to the recommended plan or add rows under 'Adjust the plan'.")
         source("Sources: War Room model (2024 NCSBE starting margins shifted by the national mood, NCSBE voter-file "
                "audience sizes, ad prices and opponent spend/reach from the Google and Meta ad libraries).")
 
@@ -1112,7 +1117,7 @@ elif STEP == 5:
                         result = S.analyze_plan(ps, M["mix"], str(ss[wk("focus")]))
                     except S.GeminiError as exc:
                         status.update(label="Analysis failed", state="error")
-                        st.error(str(exc))
+                        st.warning(str(exc))
                     else:
                         status.update(label=f"Analysis ready ({result['model']})", state="complete")
                         ss[k("result")] = result
@@ -1133,7 +1138,7 @@ elif STEP == 5:
                     try:
                         ss[k("qa")].insert(0, S.ask(ps, M["mix"], str(ss[wk("ask")])))
                     except S.GeminiError as exc:
-                        st.error(str(exc))
+                        st.warning(str(exc))
             for item in ss[k("qa")][:2]:
                 _md(f"<div class='wr-label'>{esc(item['question'])}</div><div class='wr-headline'>"
                     f"{esc(item['answer'])}</div>")
@@ -1173,11 +1178,13 @@ elif STEP == 5:
                     out = S.gemini_plan(ps, M["mix"], perms, str(ss[wk("agent_note")]))
                 except S.GeminiError as exc:
                     status.update(label="Gemini could not change the plan", state="error")
-                    st.error(str(exc))
+                    st.warning(str(exc))
                 else:
                     best, before = out["best"], out["before"]
                     better = (best["after"]["win_prob"], best["after"]["net_votes"]) >= (before["win_prob"],
                                                                                         before["net_votes"])
+                    out["unchanged"] = not S.proposal_changes(R, out)
+                    better = better and not out["unchanged"]
                     out["applied"] = better
                     if better:
                         prev = {"mix": ss[k("mix")], "msgs": message_state()}
@@ -1190,8 +1197,9 @@ elif STEP == 5:
                         ss[k("undo")] = {**prev, "scopes": {"mix", "messages"} if "messages" in perms else {"mix"},
                                          "applied_mix": ss[k("mix")], "applied_msgs": message_state()}
                     ss[k("agent")] = out
-                    status.update(label="Applied Gemini's changes" if better else "Kept your plan: Gemini's "
-                                  "proposal scored lower", state="complete")
+                    status.update(label="Applied Gemini's changes" if better else
+                                  ("Gemini kept your plan: it found no change worth making" if out["unchanged"]
+                                   else "Kept your plan: Gemini's proposal scored lower"), state="complete")
                     st.rerun()
     out = ss.get(k("agent"))
     if out:
@@ -1271,7 +1279,7 @@ elif STEP == 6:
             st.dataframe(table[cols], hide_index=True, width="stretch", column_config=cfg,
                          height=min(460, 38 + 35 * len(table)))
         else:
-            st.info("No money is planned under these settings.")
+            st.warning("No money is planned under these settings.")
         g1, g2 = st.columns(2, gap="large")
         with g1:
             _md("<div class='wr-label'>By platform</div>")

@@ -146,6 +146,17 @@ def inject(theme: str = "dark"):
     .subnav {{ margin: -2px 0 4px 34px; padding-left: 10px; border-left: 2px solid var(--border);
         font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }}
     .subnav b {{ color: var(--text-primary); }}
+    .src-status {{ display: flex; gap: 8px; font-size: 12px; color: var(--text-secondary); line-height: 1.4;
+        margin: 4px 0 6px; }}
+    .src-status b {{ color: var(--text-primary); font-weight: 700; }}
+    .src-mark {{ flex: 0 0 18px; height: 18px; border-radius: 50%; text-align: center; font-weight: 800;
+        font-size: 11px; line-height: 18px; background: var(--accent-soft); color: var(--accent); }}
+    .src-status.none .src-mark {{ background: var(--neutral-bg); color: {t['neutral_series']}; }}
+    .src-status.none {{ color: var(--text-primary); }}
+    .nodata {{ font-size: 13px; color: var(--text-secondary); padding: 14px 4px; line-height: 1.5; }}
+    .nodata-tag {{ display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase;
+        letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; margin-right: 8px;
+        background: var(--neutral-bg); color: {t['neutral_series']}; }}
     .side-foot {{ font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-top: 8px; }}
 
     /* Page header */
@@ -183,7 +194,7 @@ def inject(theme: str = "dark"):
         color: var(--text-primary); margin: 30px 0 12px; }}
     .step span {{ display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
         border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; font-weight: 800; }}
-    .step.reveal span {{ background: var(--dem); }}
+    .step.reveal span {{ background: var(--accent); }}
     .wr-lead {{ font-size: 15px; color: var(--text-secondary); margin: 10px 2px 4px; line-height: 1.5; }}
     .wr-goal {{ font-size: 14px; color: var(--text-secondary); padding-bottom: 10px; }}
     .wr-meter {{ font-size: 13.5px; color: var(--text-secondary); margin-top: -6px; }}

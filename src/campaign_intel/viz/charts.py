@@ -18,9 +18,10 @@ LEGEND_PX = 56  # Streamlit fits legend + plot into the declared height; reserve
 SIDE_LABELS = {"Dem side": "Democrats", "GOP side": "Republicans"}
 PARTIES = ["Dem", "Rep", "Unaffiliated", "Other party"]
 CHANNELS = ["Facebook / Instagram", "YouTube", "Google Search", "Google Display"]
+# Platforms are not parties, so no blue or red here (those mean Democrats and Republicans).
 CHANNEL_COLORS = {
-    "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"],
-    "dark": ["#3987e5", "#d95926", "#199e70", "#c98500"],
+    "light": ["#7c5cd6", "#d99a00", "#1baf7a", "#8d8478"],
+    "dark": ["#a78bfa", "#e0a91c", "#2bb57a", "#a59d92"],
 }
 
 
@@ -179,17 +180,20 @@ def turnout_gap(df: pd.DataFrame, group_order: list[str], theme: str, height: in
     return (rng + dots).properties(height=height or LEGEND_PX + max(110, 38 * len(order)))
 
 
-def district_board(df: pd.DataFrame, theme: str, height: int = 430) -> alt.Chart:
-    """Per CD: 2024 presidential margin (hollow) -> 2026 House result (solid), with nominees."""
+def district_board(df: pd.DataFrame, theme: str, height: int = 430, end_col: str = "result26_margin_pct",
+                   end_title: str = "2026 House result", end_words: tuple[str, str] = ("Dem won", "Rep won")) -> alt.Chart:
+    """Per CD: 2024 presidential margin (hollow) -> `end_col` (solid; the 2026 House result by default, or the
+    model's estimate), with nominees."""
     t = get_tokens(theme)
     d = df.copy()
+    d["result26_margin_pct"] = d[end_col]
     d["row"] = d["label"] + "  " + d["dem_candidate"].fillna("") + " vs " + d["rep_candidate"].fillna("")
     order = d.sort_values("dem_margin_pct", ascending=False)["row"].tolist()
-    d["won26"] = d["result26_margin_pct"].map(lambda m: "Dem won" if m > 0 else "Rep won")
+    d["won26"] = d["result26_margin_pct"].map(lambda m: end_words[0] if m > 0 else end_words[1])
     tips = [alt.Tooltip("label:N", title="District"), alt.Tooltip("dem_candidate:N", title="Democrat"),
             alt.Tooltip("rep_candidate:N", title="Republican"),
             alt.Tooltip("dem_margin_pct:Q", title="2024 president margin (D−R)", format="+.1f"),
-            alt.Tooltip("result26_margin_pct:Q", title="2026 House result (D−R)", format="+.1f"),
+            alt.Tooltip("result26_margin_pct:Q", title=f"{end_title} (D−R)", format="+.1f"),
             alt.Tooltip("holder_2024:N", title="Held after 2024")]
     m = max(20.0, float(d[["dem_margin_pct", "result26_margin_pct"]].abs().max().max()) + 3)
     base = alt.Chart(d).encode(y=alt.Y("row:N", sort=order, title=None, axis=alt.Axis(labelLimit=330)))
@@ -201,8 +205,8 @@ def district_board(df: pd.DataFrame, theme: str, height: int = 430) -> alt.Chart
     pres = base.mark_point(size=90, filled=False, strokeWidth=2, color=t["text_secondary"]).encode(x=x, tooltip=tips)
     res = base.mark_circle(size=120, opacity=1).encode(
         x="result26_margin_pct:Q",
-        color=alt.Color("won26:N", scale=alt.Scale(domain=["Dem won", "Rep won"], range=[t["dem"], t["rep"]]),
-                        title="2026 House result", legend=alt.Legend(orient="top")),
+        color=alt.Color("won26:N", scale=alt.Scale(domain=list(end_words), range=[t["dem"], t["rep"]]),
+                        title=end_title, legend=alt.Legend(orient="top")),
         tooltip=tips)
     return (band + zero + link + pres + res).properties(height=height)
 
@@ -289,7 +293,8 @@ def net_votes_bars(df: pd.DataFrame, theme: str, height: int | None = None) -> a
     return (bars + whisk).properties(height=height or max(120, 28 * len(d)))
 
 
-def reveal_board(df: pd.DataFrame, theme: str, height: int | None = None) -> alt.Chart:
+def reveal_board(df: pd.DataFrame, theme: str, height: int | None = None,
+                 proj_title: str = "Projected with plan") -> alt.Chart:
     """Per region: 2024 start (grey tick) -> our projection (hollow) -> actual 2026 result (solid)."""
     t = get_tokens(theme)
     d = df.copy()
@@ -298,16 +303,18 @@ def reveal_board(df: pd.DataFrame, theme: str, height: int | None = None) -> alt
     m = max(15.0, float(d[["start_pct", "proj_pct", "actual_pct"]].abs().max().max()) + 3)
     x = alt.X("proj_pct:Q", title="Margin, points (left = Republican, right = Democrat)", scale=alt.Scale(domain=[-m, m]))
     tips = [alt.Tooltip("label:N", title="Region"), alt.Tooltip("start_pct:Q", title="2024 start", format="+.1f"),
-            alt.Tooltip("proj_pct:Q", title="Projected with plan", format="+.1f"),
-            alt.Tooltip("actual_pct:Q", title="Actual 2026", format="+.1f"),
-            alt.Tooltip("budget:Q", title="Plan money", format="$,.0f")]
+            alt.Tooltip("proj_pct:Q", title=proj_title, format="+.1f"),
+            alt.Tooltip("actual_pct:Q", title="Actual 2026", format="+.1f")]
+    if "budget" in d.columns:
+        tips.append(alt.Tooltip("budget:Q", title="Plan money", format="$,.0f"))
     base = alt.Chart(d).encode(y=alt.Y("label:N", sort=order, title=None, axis=alt.Axis(labelLimit=180)))
     zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=t["text_muted"], strokeDash=[4, 3]).encode(x="x:Q")
     link = base.mark_rule(strokeWidth=2, color=t["border"]).encode(x=x, x2="actual_pct:Q")
     start = base.mark_tick(thickness=2, size=14, color=t["text_muted"]).encode(x="start_pct:Q", tooltip=tips)
     proj = base.mark_point(size=90, filled=False, strokeWidth=2, color=t["text_secondary"]).encode(x=x, tooltip=tips)
     act = base.mark_circle(size=130, opacity=1).encode(
-        x="actual_pct:Q", color=alt.Color("won:N", scale=alt.Scale(domain=["We won", "We lost"], range=[t["dem"], t["rep"]]),
+        x="actual_pct:Q", color=alt.Color("won:N", scale=alt.Scale(domain=["We won", "We lost"],
+                                                                  range=[t["dem"], t["rep"]]),
                                           title="Actual 2026", legend=alt.Legend(orient="top")), tooltip=tips)
     return (zero + link + start + proj + act).properties(height=height or LEGEND_PX + max(140, 30 * len(d)))
 

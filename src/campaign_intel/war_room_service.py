@@ -39,7 +39,7 @@ from campaign_intel.data.loaders import (
     SIDES,
     fmt_money,
     fmt_num,
-    load_ads,
+    load_ads_cycle,
     load_manifest,
     load_regions,
     unit_type,
@@ -412,7 +412,7 @@ def headline(ps: PlanSettings, ctx, res: SimulationResult, mm: pd.DataFrame, pla
 # ============================================================================ ad evidence (as of planning date)
 def ads_between(race: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     """Race ads delivered in [start, end], NC spend/impressions pro-rated by flight days inside the window."""
-    a = load_ads(race).copy()
+    a = load_ads_cycle(race).copy()
     if a.empty:
         return a.assign(p_spend=[], p_impr=[], side=[], frac=[])
     s0, e0 = a["start"], a["end"].fillna(end)
@@ -670,7 +670,7 @@ def message_comparison(ps: PlanSettings, top: int = 8) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def available_themes(race: str) -> dict[str, str]:
     """Theme code -> readable label for themes in this race's Meta ads (most spend first)."""
-    a = load_ads(race)
+    a = load_ads_cycle(race)
     x = a[a["platform"] == "Meta"][["message_themes", "w_nc_spend_mid"]].explode("message_themes").dropna(
         subset=["message_themes"])
     order = x.groupby("message_themes")["w_nc_spend_mid"].sum().sort_values(ascending=False).index
@@ -1292,6 +1292,19 @@ def gemini_plan(ps: PlanSettings, mix: pd.DataFrame, perms: set[str], instructio
                 + ". Revise to do better if you can; otherwise return the same proposal.")
     return {"model": model, "before": before, "best": best, "rounds": history, "permissions": sorted(perms),
             "before_mix": mix_key(mix), "before_messages": ps.messages}
+
+
+def proposal_changes(race: str, out: dict[str, Any]) -> bool:
+    """Whether Gemini's best proposal changes anything a planner would notice: money moved between areas
+    (>= $1K), an area's goal or platforms, or the message mix. A re-statement of the current plan is no change."""
+    best = out["best"]
+    if len(plan_diff(race, out["before_mix"], best["mix"])):
+        return True
+
+    def norm(m):
+        return tuple(sorted((t, round(float(w), 2)) for t, w in (m or ())))
+
+    return norm(out["before_messages"]) != norm(best["messages"])
 
 
 def plan_diff(race: str, before_json: str, after_json: str) -> pd.DataFrame:
